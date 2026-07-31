@@ -107,8 +107,8 @@ def test_doctor_exits_nonzero_for_missing_cap_with_auth() -> None:
 
 def test_doctor_exits_nonzero_outside_venv(monkeypatch) -> None:
     """When VIRTUAL_ENV is unset and executable is not inside .venv, exit nonzero."""
-    from deepbook.cli.doctor import _venv_path
+    from deepbook.cli.doctor import _is_project_venv
 
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.setattr(sys, "executable", "/usr/bin/python3")
-    assert _venv_path() is None
+    assert _is_project_venv() is not True

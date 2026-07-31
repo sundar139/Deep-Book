@@ -35,7 +35,7 @@ data_contracts/       JSON Schema contracts for events, books, manifests
 experiments/          Example manifests
 reports/protocol/     Research protocol and decision records
 src/deepbook/         Package source
-tests/                Unit, property, smoke, statistical tests
+tests/                Unit, property, smoke tests
 ```
 
 ---

@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -53,14 +54,27 @@ def _git_dirty() -> bool | None:
         return None
 
 
-def _venv_path() -> str | None:
-    venv = os.environ.get("VIRTUAL_ENV")
-    if venv:
-        return venv
-    exe = Path(sys.executable)
-    if exe.parent.name == "Scripts" and (exe.parents[1] / "pyvenv.cfg").exists():
-        return str(exe.parents[1])
-    return None
+def _is_project_venv(
+    root: Path | None = None,
+    executable: str | None = None,
+    system: str | None = None,
+) -> bool | None:
+    """Check whether the current interpreter is the repository-local .venv."""
+    try:
+        repository = (root or _repo_root()).resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not repository.exists():
+        return None
+
+    expected_venv = repository / ".venv"
+    if not expected_venv.exists():
+        return False
+
+    exe = Path(executable or sys.executable).resolve()
+    current_system = system or platform.system()
+    interpreter = "Scripts/python.exe" if current_system == "Windows" else "bin/python"
+    return exe == (expected_venv / interpreter).resolve()
 
 
 def _paid_data_allowed() -> bool:
@@ -71,7 +85,7 @@ def _paid_data_allowed() -> bool:
 def run() -> int:
     """Run the environment doctor. Returns exit code."""
     root = _repo_root()
-    venv = _venv_path()
+    is_project_env = _is_project_venv()
     exe = sys.executable
     version = sys.version.split()[0]
     commit = _git_commit()
@@ -88,12 +102,16 @@ def run() -> int:
     except ImportError:
         pkg_version = "unknown"
 
+    env_status = (
+        "active" if is_project_env is True else "inactive" if is_project_env is False else "unknown"
+    )
+
     lines = [
         f"DeepBook version: {pkg_version}",
         f"Python version: {version}",
         f"Python executable: {exe}",
         f"Repository root: {root}",
-        f"Virtual environment: {venv or 'none'}",
+        f"Project environment: {env_status}",
         f"Git commit: {commit or 'unknown'}",
         f"Working tree: {'dirty' if dirty is True else 'clean' if dirty is False else 'unknown'}",
         f"Data root: {data_root}",
@@ -114,8 +132,10 @@ def run() -> int:
         else:
             print(f"WARNING: paid data authorized up to ${max_usd:.2f}")
 
-    if venv is None:
-        print("ERROR: Python interpreter is not inside project .venv")
+    if is_project_env is not True:
+        print("ERROR: Python interpreter is not inside the project-local .venv")
+        print(f"       Expected: {root / '.venv'}")
+        print(f"       Actual: {exe}")
         exit_code = 1
 
     return exit_code
