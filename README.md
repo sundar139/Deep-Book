@@ -107,7 +107,7 @@ python -m deepbook.data.fi2010.cli audit
 python -m pytest -m data -vv
 ```
 
-The archive is pinned to the Fairdata-published byte size and SHA-256. Raw data,
+The archive is pinned to the Fairdata-published byte size and a locally computed SHA-256. Raw data,
 extracted files, acquisition records, manifests, and generated audit reports are
 Git-ignored. See `reports/protocol/fi2010_data_provenance.md` for source identity,
 license, layout, safeguards, output paths, and known metadata limitations.

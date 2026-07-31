@@ -13,7 +13,8 @@ Learning Methods” by Ntakaris et al.
 - Fairdata record identifier: `73eb48d7-4dbc-4a10-a52a-da745b47a649`
 - Authoritative archive path: `/published/BenchmarkDatasets/BenchmarkDatasets.zip`
 - Published archive bytes: `1864361899`
-- Published SHA-256: `cea93692a270724fa91e8f124da641db727d757e5e0f0bb85067709e9932f664`
+- Locally computed SHA-256 of the authoritative Fairdata archive: `cea93692a270724fa91e8f124da641db727d757e5e0f0bb85067709e9932f664`
+- Inspected Fairdata Metax metadata exposed the archive size but no per-file SHA-256.
 - License: Creative Commons Attribution 4.0
 - Rights holder: BigDataFinance
 
@@ -37,7 +38,7 @@ The command:
 
 1. requests a temporary URL from Fairdata;
 2. streams into an atomic partial file with hard byte limits;
-3. requires the published byte size and SHA-256;
+3. requires the archive byte size exposed by Fairdata metadata and the locally pinned SHA-256;
 4. requires ZIP content matching the `.zip` extension;
 5. rejects traversal, absolute paths, drive-qualified paths, links, encrypted members,
    duplicate normalized targets, conflicting file/directory targets, excessive member

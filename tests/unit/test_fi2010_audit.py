@@ -50,7 +50,7 @@ def _config(path: Path, archive: Path) -> None:
             "archive_filename": archive.name,
             "archive_size_bytes": archive.stat().st_size,
             "archive_sha256": digest,
-            "checksum_provenance": "source-published",
+            "checksum_provenance": "locally-computed from authoritative Fairdata archive",
         },
         "selection": {"benchmark_variant": "no_auction", "normalization": "zscore"},
         "published_expectations": {"fold_count": 9, "selected_matrix_count": 18},
@@ -110,6 +110,28 @@ def test_audit_is_deterministic_and_manifests_match_schemas(tmp_path: Path) -> N
         "3": 18,
     }
     assert len(splits["splits"]) == 18
+    generated_provenance = json.dumps(source).lower()
+    tracked_provenance = (
+        (repository_root / "reports" / "protocol" / "fi2010_data_provenance.md")
+        .read_text(encoding="utf-8")
+        .lower()
+    )
+    unsupported_phrases = (
+        "published " + "sha-256",
+        "checksum is " + "published by fairdata",
+        "checksum is " + "published by the fairdata metax",
+        "source-" + "published checksum",
+    )
+    assert all(phrase not in generated_provenance for phrase in unsupported_phrases)
+    assert all(phrase not in tracked_provenance for phrase in unsupported_phrases)
+    assert source["checksum_provenance"] == "locally-computed from authoritative Fairdata archive"
+    assert "locally computed sha-256 of the authoritative fairdata archive" in tracked_provenance
+    assert "no per-file sha-256" in tracked_provenance
+    assert any(
+        "computed locally from the archive downloaded from the authoritative fairdata source"
+        in note.lower()
+        for note in source["notes"]
+    )
 
     jsonschema.Draft202012Validator(
         _schema(repository_root, "fi2010_source_manifest.schema.json"),

@@ -261,7 +261,14 @@ def _source_manifest(
         "status": "audited",
         "deviations": [],
         "notes": [
-            "The checksum is published by the Fairdata Metax file metadata API.",
+            (
+                "The SHA-256 was computed locally from the archive downloaded from the "
+                "authoritative Fairdata source. The inspected Metax metadata did not publish "
+                "a per-file checksum. The locally computed digest is pinned for subsequent "
+                "integrity and reproducibility checks. This locally computed digest does not "
+                "independently establish that the authoritative server was uncompromised at "
+                "acquisition time."
+            ),
             (
                 "Fairdata authorization returns a temporary URL valid for 72 hours; "
                 "that URL is not recorded."
