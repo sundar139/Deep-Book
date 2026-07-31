@@ -1,0 +1,101 @@
+# DeepBook ablation registry
+# ============================
+# Each ablation defines a specific model or pipeline configuration variant.
+# IDs must be unique.  Status: planned | running | completed | aborted.
+
+ablations:
+  # === Backbone ablations ===
+  - id: ABL_BACKBONE_TLOB
+    description: "TLOB backbone (baseline deep LOB predictor)."
+    status: planned
+
+  - id: ABL_BACKBONE_TLOB_RAW_COUNTS
+    description: "TLOB + raw event count features appended to input."
+    status: planned
+
+  - id: ABL_BACKBONE_TLOB_HAWKES
+    description: "TLOB + Hawkes intensity features as additional input channels."
+    status: planned
+
+  - id: ABL_BACKBONE_TLOB_HAWKES_GATED
+    description: "TLOB + gated Hawkes fusion: learned gate controls Hawkes information flow."
+    status: planned
+
+  - id: ABL_BACKBONE_TLOB_HAWKES_AUX
+    description: "TLOB + Hawkes auxiliary objective: Hawkes features predict next event type as auxiliary loss."
+    status: planned
+
+  - id: ABL_BACKBONE_FUSION_AUX
+    description: "TLOB + gated Hawkes fusion + auxiliary Hawkes objective."
+    status: planned
+
+  - id: ABL_BACKBONE_NEGATIVE_CONTROLS
+    description: "Full negative-control matrix: true Hawkes, Poisson, raw counts, shuffled, shifted, random."
+    status: planned
+
+  # === Label ablations ===
+  - id: ABL_LABEL_FI2010_ORIGINAL
+    description: "Original FI-2010 labels (fixed-threshold horizon-unbiased)."
+    status: planned
+
+  - id: ABL_LABEL_HORIZON_UNBIASED
+    description: "Horizon-unbiased labels (threshold scaled with sqrt(horizon))."
+    status: planned
+
+  - id: ABL_LABEL_COST_AWARE
+    description: "Cost-aware labels incorporating spread and fee."
+    status: planned
+
+  # === Feature-set ablations ===
+  - id: ABL_FEAT_BOOK_RAW
+    description: "Raw book features: prices, sizes at each level."
+    status: planned
+
+  - id: ABL_FEAT_ORDER_FLOW
+    description: "Order-flow features: arrival rates, imbalance, intensity estimates."
+    status: planned
+
+  - id: ABL_FEAT_HAWKES
+    description: "Hawkes features: fitted intensities, branching ratios, residual excitation."
+    status: planned
+
+  - id: ABL_FEAT_CALIBRATED
+    description: "Calibrated prediction features: probabilities, entropy, confidence intervals."
+    status: planned
+
+  # === Execution signal ablations ===
+  - id: ABL_EXEC_BOOK_ONLY
+    description: "Execution conditioned on book state only."
+    status: planned
+
+  - id: ABL_EXEC_BOOK_FLOW
+    description: "Execution conditioned on book + handcrafted order-flow features."
+    status: planned
+
+  - id: ABL_EXEC_BOOK_HAWKES
+    description: "Execution conditioned on book + Hawkes state."
+    status: planned
+
+  - id: ABL_EXEC_LOGITS
+    description: "Execution conditioned on book + predictor logits."
+    status: planned
+
+  - id: ABL_EXEC_CALIBRATED
+    description: "Execution conditioned on book + calibrated probabilities."
+    status: planned
+
+  - id: ABL_EXEC_UNCERTAINTY
+    description: "Execution conditioned on probabilities + uncertainty measures."
+    status: planned
+
+  - id: ABL_EXEC_FULL
+    description: "Full state: book + Hawkes + probabilities + uncertainty."
+    status: planned
+
+  - id: ABL_EXEC_SHUFFLED
+    description: "Shuffled predictor signal (negative control)."
+    status: planned
+
+  - id: ABL_EXEC_ORACLE
+    description: "Oracle future signal (upper bound, clearly labeled as unattainable)."
+    status: planned

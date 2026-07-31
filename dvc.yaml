@@ -1,0 +1,14 @@
+# DeepBook DVC pipeline
+# ======================
+# This file documents the intended reproducible data-processing stages.
+# Actual stages will be added as each data-ingestion and feature-engineering
+# step is implemented.
+#
+# Rules:
+#   - Raw data is immutable.  Never modify files under data/raw/ by hand.
+#   - Raw and commercial data are never committed to Git.  They are tracked
+#     by DVC (when a remote is configured) or recreated from documented sources.
+#   - No remote is configured yet.
+#   - No data has been downloaded in this foundation task.
+
+stages: {}

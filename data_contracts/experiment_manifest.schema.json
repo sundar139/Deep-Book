@@ -1,0 +1,125 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://deepbook.dev/schemas/experiment_manifest.schema.json",
+    "title": "Experiment Manifest",
+    "description": "Reproducibility record for a single experiment run. Captures the full computational environment, inputs, and outputs.",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "experiment_id",
+        "created_utc",
+        "git_commit",
+        "command",
+        "status"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "experiment_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique identifier for this experiment."
+        },
+        "created_utc": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 UTC timestamp when the manifest was created."
+        },
+        "git_commit": {
+            "type": "string",
+            "minLength": 7,
+            "description": "Full Git commit SHA."
+        },
+        "git_tree_dirty": {
+            "type": "boolean",
+            "description": "Whether the working tree had uncommitted changes.",
+            "default": false
+        },
+        "command": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Exact command used to launch the experiment."
+        },
+        "config_paths": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Paths to configuration files used."
+        },
+        "config_hashes": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": "SHA-256 hashes keyed by config file path."
+        },
+        "dataset_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Dataset identifiers used in this experiment."
+        },
+        "dataset_hashes": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": "SHA-256 hashes keyed by dataset identifier."
+        },
+        "split_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Identifiers for train/validation/test splits used."
+        },
+        "random_seeds": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0},
+            "description": "All random seeds used in this experiment.",
+            "minItems": 1
+        },
+        "python_version": {
+            "type": "string",
+            "description": "Python version (e.g. 3.11.15)."
+        },
+        "dependency_snapshot": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": "Package name to version mapping."
+        },
+        "hardware_summary": {
+            "type": "object",
+            "properties": {
+                "cpu": {"type": "string"},
+                "cpu_cores": {"type": "integer"},
+                "ram_gb": {"type": "number"},
+                "gpu": {"type": "string"},
+                "gpu_memory_gb": {"type": "number"},
+                "os": {"type": "string"}
+            }
+        },
+        "model_identifier": {
+            "type": "string",
+            "description": "Unique model identifier or path."
+        },
+        "output_artifact_paths": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Paths to produced artifacts."
+        },
+        "output_artifact_hashes": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": "SHA-256 hashes keyed by artifact path."
+        },
+        "status": {
+            "type": "string",
+            "enum": ["running", "completed", "failed", "aborted"],
+            "description": "Experiment status at manifest creation time."
+        },
+        "notes": {
+            "type": "string",
+            "description": "Free-text notes or deviations from protocol."
+        },
+        "deviations": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Explicit list of protocol deviations."
+        }
+    }
+}

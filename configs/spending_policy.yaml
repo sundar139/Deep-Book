@@ -1,0 +1,36 @@
+# DeepBook spending policy
+# =========================
+# This file encodes the financial guardrails for any data acquisition.
+# It is machine-readable so that CI and runtime checks can enforce it
+# before any request that may incur cost.
+
+core:
+  research_budget_usd: 0
+
+paid_data:
+  default_authorization: false
+  # The optional extension ceiling is the absolute maximum total spend
+  # authorised for the entire project lifetime.  It requires explicit
+  # human sign-off before any individual purchase.
+  optional_total_ceiling_usd: 100
+  single_pilot_ceiling_usd: 25
+
+  # Required fields for every quote review before purchase:
+  #   provider        -- vendor name (e.g. Databento, Refinitiv)
+  #   dataset_schema  -- dataset or schema identifier
+  #   symbol          -- instrument / symbol
+  #   date_range      -- requested date range [start, end] ISO-8601
+  #   estimated_bytes -- approximate data volume
+  #   estimated_cost  -- vendor-quoted cost in USD
+  #   requested_hard_cap -- maximum authorised cost for this single request
+  #   authorizer      -- name of the human who authorised the purchase
+  #   authorization_timestamp -- ISO-8601 UTC
+
+  rules:
+    - "No purchase without an explicit human authorisation."
+    - "A metadata-only quote must be obtained and reviewed before purchase."
+    - "The authorizer must be a named person, not a bot or automated system."
+    - "NeuralMarket Databento credits are not used unless explicitly reallocated."
+    - "No automatic purchase retry on failure."
+    - "No API call that can incur cost when authorization is false."
+    - "All paid acquisitions are logged to the reproducibility record."

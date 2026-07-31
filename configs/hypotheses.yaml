@@ -1,0 +1,61 @@
+# DeepBook hypothesis registry
+# ==============================
+# Every hypothesis begins as 'planned'.  Status transitions:
+#   planned -> running -> confirmed | rejected | inconclusive
+#
+# Do not set a hypothesis to 'confirmed' before the experiment has run.
+
+hypotheses:
+  - id: H01
+    description: "Hawkes intensity features improve mid-price movement prediction accuracy over book-only features."
+    outcome_metrics: ["macro-F1", "MCC"]
+    comparison_groups: ["TLOB + book-only features", "TLOB + Hawkes features"]
+    datasets: ["FI-2010", "Binance-L2"]
+    required_controls: ["raw event counts", "shuffled intensity", "Poisson baseline"]
+    falsification: "No significant improvement on either dataset after Holm correction."
+    status: planned
+
+  - id: H02
+    description: "Hawkes intensity features improve model calibration (lower ECE) on held-out temporal blocks."
+    outcome_metrics: ["ECE", "NLL", "Brier score"]
+    comparison_groups: ["TLOB + book-only", "TLOB + Hawkes features"]
+    datasets: ["FI-2010", "Binance-L2"]
+    required_controls: ["raw event counts", "shuffled intensity"]
+    falsification: "ECE not reduced by a statistically significant margin."
+    status: planned
+
+  - id: H03
+    description: "Models incorporating Hawkes features degrade less under temporal and regime shift than book-only models."
+    outcome_metrics: ["macro-F1 delta (train -> test)", "MCC degradation"]
+    comparison_groups: ["TLOB + book-only", "TLOB + Hawkes features"]
+    datasets: ["FI-2010 temporal split", "Binance-L2 multi-month"]
+    required_controls: ["raw event counts", "constant-rate baseline"]
+    falsification: "Degradation delta not significantly smaller for Hawkes-augmented models."
+    status: planned
+
+  - id: H04
+    description: "Calibrated predictor probability signals improve execution shortfall over book-only execution signals."
+    outcome_metrics: ["implementation shortfall (bps)", "95% CVaR"]
+    comparison_groups: ["book-only execution signal", "book + calibrated probs execution signal"]
+    datasets: ["Binance-L2 execution episodes"]
+    required_controls: ["shuffled predictor signal", "oracle future signal (upper bound)"]
+    falsification: "No significant shortfall reduction after paired permutation test."
+    status: planned
+
+  - id: H05
+    description: "Uncertainty-aware conditioning (probability + entropy/variance signal) improves tail execution cost over point-prediction signals."
+    outcome_metrics: ["95% CVaR (bps)", "shortfall variance"]
+    comparison_groups: ["calibrated probs only", "probs + uncertainty signal"]
+    datasets: ["Binance-L2 execution episodes"]
+    required_controls: ["shuffled uncertainty signal"]
+    falsification: "Tail cost not significantly lower with uncertainty conditioning."
+    status: planned
+
+  - id: H06
+    description: "Hawkes-predictor execution benefits survive conservative queue-position assumptions."
+    outcome_metrics: ["implementation shortfall (bps)", "completion rate"]
+    comparison_groups: ["optimistic queue", "proportional queue", "conservative queue"]
+    datasets: ["Binance-L2 execution episodes"]
+    required_controls: ["TWAP", "Almgren-Chriss"]
+    falsification: "Conservative queue result shows no significant improvement over static baselines."
+    status: planned

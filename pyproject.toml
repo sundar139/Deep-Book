@@ -1,0 +1,144 @@
+[project]
+name = "deepbook"
+version = "0.1.0"
+description = "Leakage-controlled LOB forecasting and execution research"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11,<3.12"
+authors = [
+    {name = "DeepBook Research"},
+]
+keywords = ["limit-order-book", "forecasting", "execution", "hawkes", "deep-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "hypothesis>=6.100",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "jsonschema>=4.20",
+    "pyyaml>=6.0",
+    "detect-secrets>=1.5",
+    "build>=1.2",
+]
+data = [
+    "dvc>=3.50",
+]
+
+[project.urls]
+Repository = "https://github.com/deepbook-research/deepbook"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"deepbook" = "src/deepbook"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "D",
+    "UP", "B", "C4", "SIM", "T20", "PT",
+]
+ignore = [
+    "D100", "D104", "D107",  # missing docstring in module/package/__init__
+    "D203", "D213",           # incompatible with D211/D212
+    "SIM105",                 # contextlib.suppress over try/except/pass
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/check.py" = ["T201", "D103"]
+"src/deepbook/cli/doctor.py" = ["T201"]
+"src/deepbook/eval/stats.py" = ["N806", "D205", "D209", "D212", "D413", "D416", "D417", "D401", "D101", "D102", "D105"]
+"src/deepbook/features/hawkes.py" = ["N803", "N806", "D205", "D400", "D415"]
+"src/deepbook/validation/invariants.py" = ["N803", "N818", "D101", "D102", "D205", "D103", "D401"]
+"tests/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "N803", "D102", "D401"]
+"tests/conftest.py" = ["PT022", "D401"]
+"tests/test_exec_env.py" = ["D102"]
+"tests/property/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "S101", "SIM102"]
+"tests/smoke/*" = ["D103"]
+"tests/unit/*" = ["D103", "S101", "F401", "F841", "SIM102", "UP017"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["deepbook"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+strict = true
+show_error_codes = true
+python_version = "3.11"
+exclude = ["tests/", "scripts/"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "deepbook.eval.stats"
+disallow_any_generics = false
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+warn_return_any = false
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+module = "deepbook.features.hawkes"
+disallow_any_generics = false
+disallow_untyped_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "deepbook.validation.invariants"
+disallow_any_generics = false
+disallow_untyped_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --durations=10"
+markers = [
+    "fast: pure-function / contract tests, run on every commit",
+    "slow: statistical validation on larger samples, run before every push",
+    "gpu: requires CUDA, run locally or nightly",
+    "data: requires real downloaded data on disk, skipped in CI by design",
+]
+filterwarnings = [
+    "error::RuntimeWarning",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/deepbook"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "pragma: no cover",
+    "@abstract",
+]

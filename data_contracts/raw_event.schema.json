@@ -1,0 +1,107 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://deepbook.dev/schemas/raw_event.schema.json",
+    "title": "Raw Order-Book Event",
+    "description": "Canonical event record for a single L2 order-book or trade event. Uses observable categories — L2 data does not reveal exact order-level add/cancel/modify messages.",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "venue",
+        "instrument",
+        "exchange_timestamp",
+        "receive_timestamp",
+        "event_type"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "integer",
+            "description": "Schema version for this event record.",
+            "minimum": 1
+        },
+        "venue": {
+            "type": "string",
+            "description": "Exchange or data-source identifier (e.g. binance, coinbase, fi2010).",
+            "minLength": 1
+        },
+        "instrument": {
+            "type": "string",
+            "description": "Trading pair or instrument symbol (e.g. BTC-USDT).",
+            "minLength": 1
+        },
+        "exchange_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Exchange-reported timestamp in UTC ISO-8601."
+        },
+        "receive_timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Local system receive timestamp in UTC ISO-8601."
+        },
+        "sequence_id": {
+            "type": "integer",
+            "description": "Monotonic per-connection event sequence number.",
+            "minimum": 0
+        },
+        "event_type": {
+            "type": "string",
+            "description": "Observable event category.",
+            "enum": [
+                "bid_liquidity_addition",
+                "bid_liquidity_removal",
+                "ask_liquidity_addition",
+                "ask_liquidity_removal",
+                "buyer_initiated_trade",
+                "seller_initiated_trade",
+                "top_of_book_update",
+                "depth_update",
+                "snapshot",
+                "connection_event",
+                "gap",
+                "resync"
+            ]
+        },
+        "side": {
+            "type": "string",
+            "enum": ["bid", "ask"]
+        },
+        "price": {
+            "type": ["number", "null"],
+            "exclusiveMinimum": 0,
+            "description": "Event price level. Required for trade events and non-snapshot depth updates."
+        },
+        "quantity": {
+            "type": ["number", "null"],
+            "exclusiveMinimum": 0,
+            "description": "Event quantity."
+        },
+        "price_level": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-indexed price level from best quote."
+        },
+        "is_snapshot": {
+            "type": "boolean",
+            "description": "True if this event is part of a full book snapshot or resync.",
+            "default": false
+        },
+        "trade_id": {
+            "type": "string",
+            "description": "Exchange-assigned trade identifier."
+        },
+        "connection_id": {
+            "type": "string",
+            "description": "Stable identifier for the data-feed connection that produced this event."
+        }
+    },
+    "allOf": [
+        {
+            "if": {
+                "properties": {"event_type": {"enum": ["buyer_initiated_trade", "seller_initiated_trade"]}}
+            },
+            "then": {
+                "required": ["price", "quantity"]
+            }
+        }
+    ]
+}

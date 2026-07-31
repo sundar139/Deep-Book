@@ -1,0 +1,106 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://deepbook.dev/schemas/book_snapshot.schema.json",
+    "title": "Order-Book Snapshot",
+    "description": "A point-in-time reconstruction of the limit order book. Bid levels are ordered descending by price; ask levels are ordered ascending by price. These ordering guarantees are runtime invariants enforced in code, not expressible in JSON Schema.",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "venue",
+        "instrument",
+        "exchange_timestamp",
+        "receive_timestamp",
+        "sequence_id",
+        "bids",
+        "asks"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "integer",
+            "minimum": 1
+        },
+        "venue": {
+            "type": "string",
+            "minLength": 1
+        },
+        "instrument": {
+            "type": "string",
+            "minLength": 1
+        },
+        "exchange_timestamp": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "receive_timestamp": {
+            "type": "string",
+            "format": "date-time"
+        },
+        "sequence_id": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "connection_id": {
+            "type": "string"
+        },
+        "is_valid": {
+            "type": "boolean",
+            "description": "Whether the snapshot passed structural validity checks.",
+            "default": true
+        },
+        "is_synchronized": {
+            "type": "boolean",
+            "description": "Whether the book was fully synchronized at capture time.",
+            "default": true
+        },
+        "has_gap": {
+            "type": "boolean",
+            "description": "True if events were detected missing from the event stream.",
+            "default": false
+        },
+        "has_corruption": {
+            "type": "boolean",
+            "description": "True if structural corruption was detected in the book.",
+            "default": false
+        },
+        "bids": {
+            "type": "array",
+            "description": "Ordered bid levels (descending by price).",
+            "items": {
+                "type": "object",
+                "required": ["price", "quantity"],
+                "properties": {
+                    "price": {"type": "number", "exclusiveMinimum": 0},
+                    "quantity": {"type": "number", "minimum": 0}
+                }
+            },
+            "minItems": 1
+        },
+        "asks": {
+            "type": "array",
+            "description": "Ordered ask levels (ascending by price).",
+            "items": {
+                "type": "object",
+                "required": ["price", "quantity"],
+                "properties": {
+                    "price": {"type": "number", "exclusiveMinimum": 0},
+                    "quantity": {"type": "number", "minimum": 0}
+                }
+            },
+            "minItems": 1
+        },
+        "provenance": {
+            "type": "object",
+            "description": "Source-capture metadata for reproducibility.",
+            "properties": {
+                "source_file": {"type": "string"},
+                "source_hash": {"type": "string"},
+                "capture_tool": {"type": "string"},
+                "capture_version": {"type": "string"}
+            }
+        },
+        "checksum": {
+            "type": "string",
+            "description": "Optional integrity checksum of the raw event sequence."
+        }
+    }
+}
