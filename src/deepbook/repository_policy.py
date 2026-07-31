@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 from deepbook.registry import RegistryError, validate_ablations, validate_hypotheses
@@ -15,8 +16,14 @@ PROHIBITED_PATHS = (
     "src/deepbook/validation/invariants.py",
 )
 PROHIBITED_IMPORT_PATTERN = (
-    r"import (numpy|scipy|sklearn|torch|pandas|gymnasium|stable_baselines3)"
-    r"|from (numpy|scipy|sklearn|torch|pandas|gymnasium|stable_baselines3)"
+    r"import (scipy|sklearn|torch|pandas|gymnasium|stable_baselines3)"
+    r"|from (scipy|sklearn|torch|pandas|gymnasium|stable_baselines3)"
+)
+NUMPY_IMPORT_PATTERN = r"(?:import numpy|from numpy)"
+_ALLOWED_NUMPY_PREFIX = "src/deepbook/data/fi2010/"
+TEMPORARY_DOWNLOAD_URL_PATTERN = re.compile(
+    r"https://download\.fairdata\.fi(?::[0-9]+)?/[^\s\"']*\?[^\s\"']+",
+    re.IGNORECASE,
 )
 STAGE_PATTERN = re.compile(r"\b(?:phase|step|milestone)[\s_-]*[0-9]+\b", re.IGNORECASE)
 CREDENTIAL_NAMES = (
@@ -38,6 +45,18 @@ PEM_HEADER_PATTERN = re.compile(r"-----BEGIN(?: [A-Z]+)* PRIVATE KEY-----", re.I
 _ALLOWED_PLACEHOLDERS = re.compile(r"^(?:\$\{[^}}]+\}|<[^>]+>|changeme)$", re.IGNORECASE)
 _POLICY_SOURCE = "src/deepbook/repository_policy.py"
 _BINARY_SUFFIXES = {".ckpt", ".jpg", ".lock", ".png", ".pt", ".pth"}
+
+
+def find_scientific_import_violations(relative_path: str, text: str) -> list[str]:
+    """Return import-policy findings for one tracked Python source file."""
+    violations: list[str] = []
+    if re.search(PROHIBITED_IMPORT_PATTERN, text):
+        violations.append("prohibited scientific import")
+    if re.search(NUMPY_IMPORT_PATTERN, text) and not relative_path.startswith(
+        _ALLOWED_NUMPY_PREFIX
+    ):
+        violations.append("NumPy import outside FI-2010 data code")
+    return violations
 
 
 def find_stage_terms(text: str) -> list[str]:
@@ -125,20 +144,21 @@ def check_repository(root: Path) -> list[str]:
         if (root / relative_path).exists():
             violations.append(f"prohibited implementation file exists: {relative_path}")
 
-    imports = _git(root, "grep", "-n", "-I", "-E", PROHIBITED_IMPORT_PATTERN, "--", "*.py")
-    if imports.returncode not in (0, 1):
-        violations.append("prohibited-import query failed")
-    elif imports.stdout.strip():
-        violations.append("prohibited scientific import found")
-
     tracked = _tracked_files(root)
     for relative_path in tracked:
+        if relative_path.startswith(("data/raw/fi2010/", "data/interim/fi2010/")):
+            violations.append(f"raw or generated FI-2010 data is tracked: {relative_path}")
         text = _read_tracked_text(root, relative_path)
         if text is None:
             continue
+        if relative_path.endswith(".py") and relative_path != _POLICY_SOURCE:
+            for finding in find_scientific_import_violations(relative_path, text):
+                violations.append(f"{finding} in {relative_path}")
         if relative_path != _POLICY_SOURCE:
             for term in find_stage_terms(text):
                 violations.append(f"stage terminology in {relative_path}: {term!r}")
+        if TEMPORARY_DOWNLOAD_URL_PATTERN.search(text):
+            violations.append(f"temporary Fairdata download URL in {relative_path}")
         for name in find_credential_violations(text):
             violations.append(f"credential in {relative_path}: {name}=<redacted>")
 
@@ -149,6 +169,15 @@ def check_repository(root: Path) -> list[str]:
         violations.append("paid-data authorization does not default to false")
     if policy["core"]["research_budget_usd"] != 0:
         violations.append("research budget is not zero")
+
+    fi2010_config_path = root / "configs" / "data" / "fi2010.yaml"
+    if fi2010_config_path.exists():
+        fi2010_config = yaml.safe_load(fi2010_config_path.read_text())
+        allowed_source_hosts = {"etsin.fairdata.fi", "metax.fairdata.fi"}
+        for key in ("metadata_url", "landing_page_url", "authorization_url"):
+            url = fi2010_config["source"][key]
+            if urllib.parse.urlsplit(url).hostname not in allowed_source_hosts:
+                violations.append(f"unofficial FI-2010 source configured in {key}")
 
     try:
         validate_hypotheses(yaml.safe_load((root / "configs" / "hypotheses.yaml").read_text()))

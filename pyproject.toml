@@ -34,6 +34,8 @@ dev = [
 ]
 data = [
     "dvc>=3.50",
+    "numpy>=1.26,<3",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
@@ -68,6 +70,7 @@ ignore = [
 "scripts/check.py" = ["T201", "D103"]
 "scripts/check_repository_policy.py" = ["T201", "D103"]
 "src/deepbook/cli/doctor.py" = ["T201"]
+"src/deepbook/data/fi2010/cli.py" = ["T201"]
 "src/deepbook/repository_policy.py" = ["T201"]
 "tests/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "N803", "D102", "D401"]
 "tests/conftest.py" = ["PT022", "D401"]

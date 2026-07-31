@@ -17,6 +17,7 @@ htmlcov/
 data/raw/
 data/interim/
 data/processed/
+reports/results/
 artifacts/
 checkpoints/
 models/

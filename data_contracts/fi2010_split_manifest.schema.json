@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepbook.dev/schemas/fi2010_split_manifest.schema.json",
+  "title": "FI-2010 Published Split Manifests",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "splits"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "splits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol_identifier",
+          "benchmark_variant",
+          "normalization",
+          "source_archive_sha256",
+          "fold_identifier",
+          "role",
+          "source_member_path",
+          "source_orientation",
+          "internal_orientation",
+          "row_count",
+          "observation_count",
+          "feature_row_count",
+          "lob_row_count",
+          "engineered_feature_row_count",
+          "label_row_count",
+          "horizons_events",
+          "class_encodings",
+          "label_counts_by_horizon",
+          "observed_missing_tokens",
+          "observed_nonfinite_tokens",
+          "rejected_rows",
+          "validated_nonfinite_values",
+          "file_sha256",
+          "parser_version",
+          "known_day_indices",
+          "known_instruments",
+          "unresolved_boundary_limitations"
+        ],
+        "properties": {
+          "protocol_identifier": {"const": "fi2010_anchored_forward_cross_validation"},
+          "benchmark_variant": {"enum": ["no_auction", "auction"]},
+          "normalization": {"enum": ["zscore", "minmax", "decimal_precision"]},
+          "source_archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "fold_identifier": {"type": "integer", "minimum": 1},
+          "role": {"enum": ["training", "testing"]},
+          "source_member_path": {"type": "string", "minLength": 1},
+          "source_orientation": {
+            "enum": ["variables_by_observation", "observation_by_variable"]
+          },
+          "internal_orientation": {"const": "variables_by_observation"},
+          "row_count": {"const": 149},
+          "observation_count": {"type": "integer", "minimum": 1},
+          "feature_row_count": {"const": 144},
+          "lob_row_count": {"const": 40},
+          "engineered_feature_row_count": {"const": 104},
+          "label_row_count": {"const": 5},
+          "horizons_events": {
+            "type": "array",
+            "prefixItems": [
+              {"const": 10},
+              {"const": 20},
+              {"const": 30},
+              {"const": 50},
+              {"const": 100}
+            ],
+            "items": false
+          },
+          "class_encodings": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["1", "2", "3"],
+            "properties": {
+              "1": {"const": "up"},
+              "2": {"const": "stationary"},
+              "3": {"const": "down"}
+            }
+          },
+          "label_counts_by_horizon": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["10", "20", "30", "50", "100"],
+            "properties": {
+              "10": {"$ref": "#/$defs/classCounts"},
+              "20": {"$ref": "#/$defs/classCounts"},
+              "30": {"$ref": "#/$defs/classCounts"},
+              "50": {"$ref": "#/$defs/classCounts"},
+              "100": {"$ref": "#/$defs/classCounts"}
+            }
+          },
+          "observed_missing_tokens": {"type": "integer", "minimum": 0},
+          "observed_nonfinite_tokens": {"type": "integer", "minimum": 0},
+          "rejected_rows": {"type": "integer", "minimum": 0},
+          "validated_nonfinite_values": {"type": "integer", "minimum": 0},
+          "file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "parser_version": {"type": "string", "minLength": 1},
+          "known_day_indices": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "integer", "minimum": 1, "maximum": 10}
+          },
+          "known_instruments": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 5,
+            "maxItems": 5,
+            "uniqueItems": true
+          },
+          "unresolved_boundary_limitations": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "classCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["1", "2", "3"],
+      "properties": {
+        "1": {"type": "integer", "minimum": 0},
+        "2": {"type": "integer", "minimum": 0},
+        "3": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

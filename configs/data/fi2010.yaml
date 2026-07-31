@@ -1,0 +1,58 @@
+schema_version: 1
+dataset:
+  name: FI-2010
+  title: Benchmark Dataset for Mid-Price Forecasting of Limit Order Book Data with Machine Learning Methods
+  persistent_identifier: urn:nbn:fi:csc-kata20170601153214969115
+  landing_page_identifier: 73eb48d7-4dbc-4a10-a52a-da745b47a649
+  version: 1
+  creators:
+    - Adamantios Ntakaris
+    - Martin Magris
+    - Juho Kanniainen
+    - Moncef Gabbouj
+    - Alexandros Iosifidis
+  catalog_publisher: Ministry of Education and Culture, Finland
+  repository: Fairdata IDA
+  access_type: Open
+  license:
+    name: Creative Commons Attribution 4.0 International (CC BY 4.0)
+    url: https://creativecommons.org/licenses/by/4.0/
+  rights_holder: BigDataFinance
+source:
+  metadata_url: https://metax.fairdata.fi/v3/datasets/73eb48d7-4dbc-4a10-a52a-da745b47a649
+  landing_page_url: https://etsin.fairdata.fi/dataset/73eb48d7-4dbc-4a10-a52a-da745b47a649
+  authorization_url: https://etsin.fairdata.fi/api/v3/download/authorize
+  authoritative_file_path: /published/BenchmarkDatasets/BenchmarkDatasets.zip
+  archive_filename: BenchmarkDatasets.zip
+  archive_size_bytes: 1864361899
+  archive_sha256: cea93692a270724fa91e8f124da641db727d757e5e0f0bb85067709e9932f664
+  checksum_provenance: locally-computed from authoritative Fairdata archive
+  download_url_stability: temporary-72-hours
+  timeout_seconds: 120
+archive_limits:
+  maximum_archive_bytes: 2200000000
+  maximum_extracted_bytes: 33000000000
+  maximum_member_bytes: 3000000000
+  maximum_member_count: 500
+  maximum_compression_ratio: 250
+local_paths:
+  raw_root: data/raw/fi2010
+  interim_root: data/interim/fi2010
+  report_root: reports/results
+selection:
+  benchmark_variant: no_auction
+  normalization: zscore
+published_expectations:
+  stocks: 5
+  trading_days: 10
+  logical_rows: 149
+  lob_rows: 40
+  engineered_feature_rows: 104
+  label_rows: 5
+  horizons_events: [10, 20, 30, 50, 100]
+  class_encodings:
+    "1": up
+    "2": stationary
+    "3": down
+  fold_count: 9
+  selected_matrix_count: 18

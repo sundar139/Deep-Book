@@ -6,7 +6,12 @@ import json
 
 import pytest
 
-from deepbook.repository_policy import find_credential_violations, find_stage_terms
+from deepbook.repository_policy import (
+    TEMPORARY_DOWNLOAD_URL_PATTERN,
+    find_credential_violations,
+    find_scientific_import_violations,
+    find_stage_terms,
+)
 
 
 @pytest.mark.parametrize(
@@ -98,3 +103,23 @@ def test_findings_are_redacted() -> None:
 
     assert findings == ["COINBASE_API_SECRET=<redacted>"]
     assert value not in " ".join(findings)
+
+
+def test_temporary_fairdata_url_is_detected_without_storing_a_token() -> None:
+    host = "download" + ".fairdata.fi"
+    runtime_url = f"https://{host}/download?token=" + "runtime-secret"
+    assert TEMPORARY_DOWNLOAD_URL_PATTERN.search(runtime_url)
+
+
+def test_numpy_is_allowed_only_in_fi2010_data_package() -> None:
+    statement = "import " + "numpy as np"
+    assert find_scientific_import_violations("src/deepbook/data/fi2010/dataset.py", statement) == []
+    assert find_scientific_import_violations("src/deepbook/model.py", statement) == [
+        "NumPy import outside FI-2010 data code"
+    ]
+
+
+def test_modeling_scientific_import_remains_prohibited() -> None:
+    assert find_scientific_import_violations(
+        "src/deepbook/data/fi2010/dataset.py", "import " + "sklearn"
+    ) == ["prohibited scientific import"]

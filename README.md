@@ -35,7 +35,7 @@ data_contracts/       JSON Schema contracts for events, books, manifests
 experiments/          Example manifests
 reports/protocol/     Research protocol and decision records
 src/deepbook/         Package source
-tests/                Unit, property, smoke tests
+tests/                Unit, property, smoke, data tests
 ```
 
 ---
@@ -94,6 +94,26 @@ configuration is detected. Never prints secret values.
 
 ---
 
+## FI-2010 Acquisition and Audit
+
+```powershell
+# Authoritative Fairdata download, integrity checks, and safe extraction
+python -m deepbook.data.fi2010.cli acquire
+
+# Published-matrix and supplied-label audit
+python -m deepbook.data.fi2010.cli audit
+
+# Explicit real-data acceptance test (normally skipped without local data)
+python -m pytest -m data -vv
+```
+
+The archive is pinned to the Fairdata-published byte size and SHA-256. Raw data,
+extracted files, acquisition records, manifests, and generated audit reports are
+Git-ignored. See `reports/protocol/fi2010_data_provenance.md` for source identity,
+license, layout, safeguards, output paths, and known metadata limitations.
+
+---
+
 ## Data and Secret Policy
 
 - `.env` is **git-ignored**.  Never commit credentials.
@@ -118,7 +138,7 @@ configuration is detected. Never prints secret values.
 
 ## Current Status
 
-Repository foundation established.  Data contracts, configuration registries,
-research protocol, environment doctor, CI, and test infrastructure are in
-place.  No data ingestion, modeling, or execution simulation has been
-implemented.
+Repository foundation and the authoritative FI-2010 acquisition/audit pipeline are in
+place. The pipeline verifies source bytes, extracts safely, preserves supplied labels,
+and generates deterministic provenance and split manifests. No modeling or execution
+simulation has been implemented.

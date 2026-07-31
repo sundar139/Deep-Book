@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepbook.dev/schemas/fi2010_source_manifest.schema.json",
+  "title": "FI-2010 Source Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_name",
+    "dataset_title",
+    "persistent_identifier",
+    "source_landing_page_identifier",
+    "source_type",
+    "accessed_utc",
+    "archive_filename",
+    "archive_size_bytes",
+    "archive_sha256",
+    "checksum_provenance",
+    "access_type",
+    "license",
+    "rights_holder",
+    "member_count",
+    "extracted_byte_size",
+    "selected_benchmark_variant",
+    "selected_normalization",
+    "acquisition_command",
+    "acquisition_git_commit",
+    "status",
+    "deviations",
+    "notes"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "dataset_name": {"const": "FI-2010"},
+    "dataset_title": {"type": "string", "minLength": 1},
+    "persistent_identifier": {"type": "string", "minLength": 1},
+    "source_landing_page_identifier": {"type": "string", "minLength": 1},
+    "source_type": {"const": "authoritative_fairdata_ida_archive"},
+    "accessed_utc": {"type": "string", "format": "date-time"},
+    "archive_filename": {"type": "string", "minLength": 1},
+    "archive_size_bytes": {"type": "integer", "minimum": 1},
+    "archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "checksum_provenance": {
+      "type": "string",
+      "enum": ["source-published", "runtime-supplied expected checksum", "locally-computed from authoritative Fairdata archive"]
+    },
+    "access_type": {"type": "string", "minLength": 1},
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "url"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "format": "uri"}
+      }
+    },
+    "rights_holder": {"type": "string", "minLength": 1},
+    "member_count": {"type": "integer", "minimum": 1},
+    "extracted_byte_size": {"type": "integer", "minimum": 1},
+    "selected_benchmark_variant": {"type": "string", "minLength": 1},
+    "selected_normalization": {"type": "string", "minLength": 1},
+    "acquisition_command": {"type": "string", "minLength": 1},
+    "acquisition_git_commit": {"type": "string", "minLength": 7},
+    "status": {"enum": ["acquired", "audited", "failed"]},
+    "deviations": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  }
+}
