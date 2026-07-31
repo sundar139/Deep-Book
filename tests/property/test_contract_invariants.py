@@ -25,55 +25,61 @@ def _load_schema(name: str) -> dict:
 # Strategy: valid raw events
 # ---------------------------------------------------------------------------
 
-_valid_event_types = st.sampled_from(
-    [
-        "bid_liquidity_addition",
-        "bid_liquidity_removal",
-        "ask_liquidity_addition",
-        "ask_liquidity_removal",
-        "buyer_initiated_trade",
-        "seller_initiated_trade",
-        "top_of_book_update",
-        "depth_update",
-        "snapshot",
-        "connection_event",
-        "gap",
-        "resync",
-    ]
-)
+_EVENTS_REQUIRING_PRICE = {
+    "buyer_initiated_trade",
+    "seller_initiated_trade",
+    "bid_liquidity_addition",
+    "bid_liquidity_removal",
+    "ask_liquidity_addition",
+    "ask_liquidity_removal",
+    "depth_update",
+    "top_of_book_update",
+}
 
-_valid_raw_event_st = st.fixed_dictionaries(
-    {
-        "schema_version": st.integers(min_value=1, max_value=10),
-        "venue": st.text(
-            min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N"))
-        ),
-        "instrument": st.text(
-            min_size=1, max_size=20, alphabet=st.characters(whitelist_categories=("L", "N", "P"))
-        ),
-        "exchange_timestamp": st.just("2026-07-30T12:00:00Z"),
-        "receive_timestamp": st.just("2026-07-30T12:00:00Z"),
-        "event_type": _valid_event_types,
-        "price": st.one_of(st.none(), st.floats(min_value=0.01, max_value=1e6)),
-        "quantity": st.one_of(st.none(), st.floats(min_value=0.0001, max_value=1e6)),
-        "is_snapshot": st.booleans(),
-    }
-)
+_EVENTS_REQUIRING_QUANTITY = {"buyer_initiated_trade", "seller_initiated_trade"}
 
 
 @settings(max_examples=50)
-@given(_valid_raw_event_st)
-def test_generated_valid_raw_events_pass(data: dict) -> None:
+@given(
+    event_type=st.sampled_from(sorted(_EVENTS_REQUIRING_PRICE)),
+)
+def test_events_requiring_price_rejected_without_it(event_type: str) -> None:
     v = Draft202012Validator(_load_schema("raw_event.schema.json"))
-    # Trade events need price+quantity — Hypothesis may generate a trade
-    # type without those, which is semantically invalid. Skip those.
-    if data["event_type"] in ("buyer_initiated_trade", "seller_initiated_trade"):
-        if data["price"] is None or data["quantity"] is None:
-            return  # skip — trade events require price/quantity
+    data = {
+        "schema_version": 1,
+        "venue": "binance",
+        "instrument": "BTC-USDT",
+        "exchange_timestamp": "2026-07-30T12:00:00Z",
+        "receive_timestamp": "2026-07-30T12:00:00Z",
+        "event_type": event_type,
+    }
+    if event_type in _EVENTS_REQUIRING_QUANTITY:
+        data["quantity"] = 1.0
+    with pytest.raises(ValidationError):
+        v.validate(data)
+
+
+@settings(max_examples=30)
+@given(
+    event_type=st.sampled_from(["snapshot", "connection_event", "gap", "resync"]),
+)
+def test_non_depth_events_accepted_without_price(event_type: str) -> None:
+    v = Draft202012Validator(_load_schema("raw_event.schema.json"))
+    data = {
+        "schema_version": 1,
+        "venue": "binance",
+        "instrument": "BTC-USDT",
+        "exchange_timestamp": "2026-07-30T12:00:00Z",
+        "receive_timestamp": "2026-07-30T12:00:00Z",
+        "event_type": event_type,
+    }
+    # snapshot needs is_snapshot flag
+    if event_type == "snapshot":
+        data["is_snapshot"] = True
     try:
         v.validate(data)
     except ValidationError as e:
-        pytest.fail(f"Valid-looking event rejected: {e}")
+        pytest.fail(f"Valid event type {event_type} without price rejected: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +139,7 @@ def test_generated_valid_book_snapshots_pass(data: dict) -> None:
             "random_seeds": st.lists(
                 st.integers(min_value=0, max_value=2**31 - 1), min_size=1, max_size=10
             ),
-            "status": st.sampled_from(["running", "completed", "failed", "aborted"]),
+            "status": st.sampled_from(["planned", "running", "completed", "failed", "aborted"]),
         }
     )
 )

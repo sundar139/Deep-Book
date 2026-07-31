@@ -51,19 +51,9 @@ def test_ceilings_are_positive_when_present() -> None:
     assert pd["single_pilot_ceiling_usd"] <= pd["optional_total_ceiling_usd"]
 
 
-def test_authorization_true_with_zero_cap_would_be_unsafe() -> None:
-    """If authorization is ever set to true, max cap must be > 0."""
-    # This is a meta-test: the current policy is safe.
-    # If someone changes authorization to true without updating cap,
-    # our runtime checks would catch it.
+def test_rules_exist_and_cover_key_requirements() -> None:
     policy = _load_policy()
-    if policy["paid_data"]["default_authorization"]:
-        # Should not happen in committed config, but verify safety logic
-        cap = policy["paid_data"].get("single_pilot_ceiling_usd", 0)
-        assert cap > 0, "authorization is true but cap is not positive"
-
-
-def test_neuralmarket_credits_not_used_by_default() -> None:
-    policy = _load_policy()
-    rules = [r.lower() for r in policy["paid_data"]["rules"]]
-    assert any("neuralmarket" in r for r in rules)
+    rules_text = " ".join(policy["paid_data"]["rules"]).lower()
+    assert "human" in rules_text, "human authorization rule missing"
+    assert "automatic" in rules_text or "retry" in rules_text, "no-auto-retry rule missing"
+    assert "neuralmarket" in rules_text, "NeuralMarket credits rule missing"

@@ -33,3 +33,5 @@ build/
 .doit.db*
 .memory.md
 .agent-memory/
+.tmp-clean-import/
+graphify-out/

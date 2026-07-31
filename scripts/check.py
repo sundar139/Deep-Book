@@ -1,9 +1,10 @@
-"""Aggregate quality check script for DeepBook.
+"""Aggregate quality gate script for DeepBook.
 
 Usage:
     python scripts/check.py
 
-Runs: ruff check, ruff format check, mypy, pytest on unit/property/smoke.
+Runs: ruff check, ruff format check, mypy, unit/property/smoke tests,
+repository-policy check, pre-commit all-files, package build, environment doctor.
 Exits zero only when all gates pass.
 """
 
@@ -54,10 +55,24 @@ def main() -> int:
             "tests/smoke",
             "-q",
             "--tb=short",
-            "-m",
-            "not slow and not gpu and not data",
         ],
         "Pytest (unit + property + smoke)",
+    )
+    failures += run(
+        [sys.executable, str(ROOT / "scripts" / "check_repository_policy.py")],
+        "Repository policy check",
+    )
+    failures += run(
+        [sys.executable, "-m", "pre_commit", "run", "--all-files"],
+        "Pre-commit (all files)",
+    )
+    failures += run(
+        [sys.executable, "-m", "build"],
+        "Package build",
+    )
+    failures += run(
+        [sys.executable, "-m", "deepbook.cli.doctor"],
+        "Environment doctor",
     )
 
     print(f"\n{'=' * 60}")

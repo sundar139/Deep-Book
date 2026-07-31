@@ -1,6 +1,6 @@
 {
     "schema_version": 1,
-    "experiment_id": "example-baseline-000",
+    "experiment_id": "example-foundation-manifest",
     "created_utc": "2026-07-30T00:00:00Z",
     "git_commit": "0000000000000000000000000000000000000000",
     "git_tree_dirty": false,
@@ -9,35 +9,7 @@
     "config_hashes": {
         "configs/example.yaml": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
-    "dataset_ids": ["FI-2010-benchmark-v1"],
-    "dataset_hashes": {
-        "FI-2010-benchmark-v1": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    },
-    "split_ids": ["split-train-70", "split-val-15", "split-test-15"],
-    "random_seeds": [42, 123, 456, 789, 1024],
-    "python_version": "3.11.15",
-    "dependency_snapshot": {
-        "deepbook": "0.1.0",
-        "numpy": "2.4.6",
-        "scipy": "1.17.1"
-    },
-    "hardware_summary": {
-        "cpu": "Example CPU",
-        "cpu_cores": 8,
-        "ram_gb": 32,
-        "gpu": "none",
-        "os": "Windows 10"
-    },
-    "model_identifier": "mlp-baseline-001",
-    "output_artifact_paths": [
-        "artifacts/example-baseline-000/metrics.json",
-        "artifacts/example-baseline-000/model.pt"
-    ],
-    "output_artifact_hashes": {
-        "artifacts/example-baseline-000/metrics.json": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "artifacts/example-baseline-000/model.pt": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-    },
-    "status": "completed",
-    "notes": "Example manifest for schema validation. Not a real experiment.",
+    "status": "planned",
+    "notes": "Example manifest for schema validation. No experiment has been executed.",
     "deviations": []
 }

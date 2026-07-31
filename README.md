@@ -71,7 +71,6 @@ python -m mypy src
 
 # Tests
 python -m pytest tests/unit tests/property tests/smoke
-python -m pytest tests/integration tests/regression tests/statistical
 
 # Pre-commit (all files)
 python -m pre_commit run --all-files

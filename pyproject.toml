@@ -1,6 +1,6 @@
 [project]
 name = "deepbook"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Leakage-controlled LOB forecasting and execution research"
 readme = "README.md"
 license = {text = "MIT"}
@@ -43,11 +43,11 @@ Repository = "https://github.com/deepbook-research/deepbook"
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = {attr = "deepbook.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-dir]
-"deepbook" = "src/deepbook"
 
 [tool.ruff]
 target-version = "py311"
@@ -66,13 +66,10 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/check.py" = ["T201", "D103"]
+"scripts/check_repository_policy.py" = ["T201", "D103"]
 "src/deepbook/cli/doctor.py" = ["T201"]
-"src/deepbook/eval/stats.py" = ["N806", "D205", "D209", "D212", "D413", "D416", "D417", "D401", "D101", "D102", "D105"]
-"src/deepbook/features/hawkes.py" = ["N803", "N806", "D205", "D400", "D415"]
-"src/deepbook/validation/invariants.py" = ["N803", "N818", "D101", "D102", "D205", "D103", "D401"]
 "tests/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "N803", "D102", "D401"]
 "tests/conftest.py" = ["PT022", "D401"]
-"tests/test_exec_env.py" = ["D102"]
 "tests/property/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "S101", "SIM102"]
 "tests/smoke/*" = ["D103"]
 "tests/unit/*" = ["D103", "S101", "F401", "F841", "SIM102", "UP017"]
@@ -93,26 +90,6 @@ exclude = ["tests/", "scripts/"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "deepbook.eval.stats"
-disallow_any_generics = false
-disallow_untyped_defs = false
-disallow_untyped_calls = false
-warn_return_any = false
-disable_error_code = ["arg-type"]
-
-[[tool.mypy.overrides]]
-module = "deepbook.features.hawkes"
-disallow_any_generics = false
-disallow_untyped_defs = false
-warn_return_any = false
-
-[[tool.mypy.overrides]]
-module = "deepbook.validation.invariants"
-disallow_any_generics = false
-disallow_untyped_defs = false
-warn_return_any = false
-
-[[tool.mypy.overrides]]
 module = "tests.*"
 ignore_errors = false
 disallow_untyped_defs = false
@@ -123,8 +100,6 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers --durations=10"
 markers = [
     "fast: pure-function / contract tests, run on every commit",
-    "slow: statistical validation on larger samples, run before every push",
-    "gpu: requires CUDA, run locally or nightly",
     "data: requires real downloaded data on disk, skipped in CI by design",
 ]
 filterwarnings = [

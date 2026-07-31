@@ -109,7 +109,7 @@
         },
         "status": {
             "type": "string",
-            "enum": ["running", "completed", "failed", "aborted"],
+            "enum": ["planned", "running", "completed", "failed", "aborted"],
             "description": "Experiment status at manifest creation time."
         },
         "notes": {

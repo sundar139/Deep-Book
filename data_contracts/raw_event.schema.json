@@ -97,10 +97,35 @@
     "allOf": [
         {
             "if": {
-                "properties": {"event_type": {"enum": ["buyer_initiated_trade", "seller_initiated_trade"]}}
+                "properties": {
+                    "event_type": {
+                        "enum": [
+                            "buyer_initiated_trade",
+                            "seller_initiated_trade",
+                            "bid_liquidity_addition",
+                            "bid_liquidity_removal",
+                            "ask_liquidity_addition",
+                            "ask_liquidity_removal",
+                            "depth_update",
+                            "top_of_book_update"
+                        ]
+                    }
+                }
             },
             "then": {
-                "required": ["price", "quantity"]
+                "required": ["price"]
+            }
+        },
+        {
+            "if": {
+                "properties": {
+                    "event_type": {
+                        "enum": ["buyer_initiated_trade", "seller_initiated_trade"]
+                    }
+                }
+            },
+            "then": {
+                "required": ["quantity"]
             }
         }
     ]

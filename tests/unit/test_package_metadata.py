@@ -14,27 +14,13 @@ def test_package_has_version() -> None:
 
     assert isinstance(deepbook.__version__, str)
     assert len(deepbook.__version__) > 0
-    # version should be parseable as semver-like
     parts = deepbook.__version__.split(".")
     assert len(parts) >= 2
 
 
-def test_package_exposes_validation() -> None:
-    from deepbook.validation import invariants
+def test_version_via_importlib_matches() -> None:
+    from importlib.metadata import version
 
-    assert hasattr(invariants, "check_book")
-    assert hasattr(invariants, "InvariantViolation")
+    import deepbook
 
-
-def test_package_exposes_eval() -> None:
-    from deepbook.eval import stats
-
-    assert hasattr(stats, "paired_bootstrap_ci")
-    assert hasattr(stats, "diebold_mariano")
-
-
-def test_package_exposes_features() -> None:
-    from deepbook.features import hawkes
-
-    assert hasattr(hawkes, "simulate_hawkes")
-    assert hasattr(hawkes, "fit_hawkes_mle")
+    assert version("deepbook") == deepbook.__version__

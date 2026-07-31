@@ -111,6 +111,46 @@ def test_negative_price_rejected() -> None:
         v.validate(data)
 
 
+def test_depth_event_without_price_rejected() -> None:
+    """Non-snapshot depth events require a price."""
+    v = _validator(RAW_SCHEMA)
+    data = _valid_raw_event(event_type="depth_update")
+    del data["price"]
+    with pytest.raises(ValidationError):
+        v.validate(data)
+
+
+def test_snapshot_without_price_accepted() -> None:
+    """Snapshots are exempt from the price requirement."""
+    v = _validator(RAW_SCHEMA)
+    v.validate(
+        {
+            "schema_version": 1,
+            "venue": "binance",
+            "instrument": "BTC-USDT",
+            "exchange_timestamp": "2026-07-30T12:00:00Z",
+            "receive_timestamp": "2026-07-30T12:00:00Z",
+            "event_type": "snapshot",
+            "is_snapshot": True,
+        }
+    )
+
+
+def test_connection_event_without_price_accepted() -> None:
+    """Connection/gap/resync events do not require a price."""
+    v = _validator(RAW_SCHEMA)
+    v.validate(
+        {
+            "schema_version": 1,
+            "venue": "binance",
+            "instrument": "BTC-USDT",
+            "exchange_timestamp": "2026-07-30T12:00:00Z",
+            "receive_timestamp": "2026-07-30T12:00:00Z",
+            "event_type": "connection_event",
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Book snapshot schema
 # ---------------------------------------------------------------------------
@@ -219,6 +259,11 @@ def test_manifest_invalid_status_rejected() -> None:
     data = _valid_manifest(status="fictional_status")
     with pytest.raises(ValidationError):
         v.validate(data)
+
+
+def test_manifest_planned_status_accepted() -> None:
+    v = _validator(MANIFEST_SCHEMA)
+    v.validate(_valid_manifest(status="planned"))
 
 
 def test_example_manifest_validates() -> None:

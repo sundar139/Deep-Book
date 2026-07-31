@@ -1,7 +1,7 @@
 """Tests for environment configuration and spending policy.
 
 These test safe defaults, rejection of unsafe states,
-and the absence of a .env file.
+and the absence of credential leakage.
 """
 
 from __future__ import annotations
@@ -14,11 +14,20 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_no_dotenv_file_exists() -> None:
-    """A .env file must not be tracked. If one exists locally it is user config."""
-    env_path = ROOT / ".env"
-    # We don't assert absence (user may have one locally).
-    # We do verify the example is present.
+def test_no_dotenv_file_tracked() -> None:
+    """A .env file must not be tracked by git."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", ".env"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert result.returncode != 0, ".env is tracked by git"
+
+
+def test_dotenv_example_exists() -> None:
     example = ROOT / ".env.example"
     assert example.exists(), ".env.example is missing"
 
@@ -36,10 +45,12 @@ def test_env_example_has_expected_keys() -> None:
         assert key in content, f"{key} missing from .env.example"
 
 
-def test_paid_data_defaults_false_without_env() -> None:
-    """Without DEEPBOOK_ALLOW_PAID_DATA set, paid data is not authorized."""
-    val = os.environ.get("DEEPBOOK_ALLOW_PAID_DATA", "false").strip().lower()
-    assert val in ("false", "0", "no", ""), f"unexpected default: {val}"
+def test_paid_data_defaults_false(monkeypatch) -> None:
+    """Without DEEPBOOK_ALLOW_PAID_DATA, the doctor reports paid data as false."""
+    monkeypatch.delenv("DEEPBOOK_ALLOW_PAID_DATA", raising=False)
+    from deepbook.cli.doctor import _paid_data_allowed
+
+    assert _paid_data_allowed() is False
 
 
 def test_spending_policy_defaults_safe() -> None:
@@ -57,14 +68,15 @@ def test_spending_policy_has_required_rules() -> None:
     assert any("no automatic" in r.lower() or "retry" in r.lower() for r in rules)
 
 
-def test_max_paid_defaults_zero() -> None:
+def test_max_paid_defaults_zero(monkeypatch) -> None:
+    """DEEPBOOK_MAX_PAID_REQUEST_USD defaults to '0'."""
+    monkeypatch.delenv("DEEPBOOK_MAX_PAID_REQUEST_USD", raising=False)
     max_paid = os.environ.get("DEEPBOOK_MAX_PAID_REQUEST_USD", "0")
     assert max_paid == "0" or float(max_paid) == 0.0
 
 
 def test_no_api_key_in_tracked_files() -> None:
-    """No file under the tracked root should contain a real Databento API key."""
-    # Databento keys are 64 hex chars or start with 'db-'
+    """No tracked file should contain a real Databento API key."""
     import subprocess
 
     result = subprocess.run(
@@ -75,6 +87,7 @@ def test_no_api_key_in_tracked_files() -> None:
     )
     tracked = result.stdout.strip("\0").split("\0") if result.stdout.strip() else []
 
+    found = False
     for rel in tracked:
         fpath = ROOT / rel
         if not fpath.is_file():
@@ -85,22 +98,26 @@ def test_no_api_key_in_tracked_files() -> None:
             content = fpath.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue
-        # Heuristic: look for Databento key patterns
-        if "db-" in content and "DATABENTO_API_KEY" not in content:
-            # check if it's actually a real key (not the example)
+        # Heuristic: look for non-example Databento key patterns
+        if "db-" in content and "DATABENTO_API_KEY" in content:
             if "db-YOUR" not in content and "db-example" not in content:
-                # Might be real; flag for review
-                pass  # ponytail: scanning heuristic — full secret-detection via pre-commit
+                found = True
+    assert not found, "suspicious Databento key pattern found in tracked files"
 
 
 def test_venv_not_in_tracked_files() -> None:
-    """Verify .venv is not tracked by git."""
-    result = os.popen(f'cd "{ROOT}" && git ls-files .venv').read()
-    assert result.strip() == "", f".venv is tracked: {result.strip()}"
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "ls-files", ".venv"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert result.stdout.strip() == "", f".venv is tracked: {result.stdout.strip()}"
 
 
 def test_env_is_git_ignored() -> None:
-    """Verify .env would be ignored by git."""
     import subprocess
 
     result = subprocess.run(
@@ -109,5 +126,25 @@ def test_env_is_git_ignored() -> None:
         text=True,
         cwd=ROOT,
     )
-    # git check-ignore exits 0 if ignored, 1 if not
     assert result.returncode == 0, f".env is NOT git-ignored: {result.stderr}"
+
+
+def test_dotenv_absence_does_not_break_doctor(monkeypatch) -> None:
+    """The doctor must not fail just because .env is absent."""
+    monkeypatch.delenv("DEEPBOOK_ALLOW_PAID_DATA", raising=False)
+    monkeypatch.delenv("DEEPBOOK_MAX_PAID_REQUEST_USD", raising=False)
+    monkeypatch.delenv("DEEPBOOK_DATA_ROOT", raising=False)
+    monkeypatch.delenv("DEEPBOOK_ARTIFACT_ROOT", raising=False)
+    import subprocess as sp
+
+    result = sp.run(
+        [os.sys.executable, "-m", "deepbook.cli.doctor"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={**os.environ},
+    )
+    # Should exit 0 in a valid venv — the absence of .env vars is fine
+    assert result.returncode == 0, (
+        f"doctor exited {result.returncode} when .env vars absent: {result.stderr}"
+    )

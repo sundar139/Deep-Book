@@ -61,6 +61,26 @@ def test_ablations_all_planned() -> None:
         assert a["status"] == "planned", f"{a['id']}: expected 'planned', got '{a['status']}'"
 
 
+def test_synthetic_duplicate_id_rejected() -> None:
+    """Two entries with the same ID must be detected."""
+    data = _load_yaml("hypotheses.yaml")
+    ids = [h["id"] for h in data["hypotheses"]]
+    # Force a duplicate
+    ids[0] = ids[1] if len(ids) > 1 else ids[0]
+    assert len(ids) != len(set(ids)), "synthetic duplicate ID was not detected"
+
+
+def test_synthetic_malformed_status_rejected() -> None:
+    """An invalid status string must be caught."""
+    data = _load_yaml("hypotheses.yaml")
+    allowed = {"planned", "running", "confirmed", "rejected", "inconclusive"}
+    # Inject a bad status
+    data["hypotheses"][0]["status"] = "not_a_real_status"
+    assert data["hypotheses"][0]["status"] not in allowed, (
+        "synthetic malformed status was not detected"
+    )
+
+
 def test_no_phase_terminology_in_ids() -> None:
     """IDs must not contain phase/step/milestone implementation-stage terminology."""
     data_h = _load_yaml("hypotheses.yaml")

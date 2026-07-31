@@ -33,14 +33,22 @@ def _git_commit() -> str | None:
 
 
 def _git_dirty() -> bool | None:
+    """Return True when the working tree has uncommitted changes.
+
+    Covers tracked modified and untracked non-ignored files.
+    ``None`` means the Git query failed.
+    """
     try:
         result = subprocess.run(
-            ["git", "diff-index", "--quiet", "HEAD", "--"],
+            ["git", "status", "--porcelain"],
             capture_output=True,
+            text=True,
             cwd=_repo_root(),
             timeout=5,
         )
-        return result.returncode != 0
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() != ""
     except Exception:
         return None
 
@@ -87,7 +95,7 @@ def run() -> int:
         f"Repository root: {root}",
         f"Virtual environment: {venv or 'none'}",
         f"Git commit: {commit or 'unknown'}",
-        f"Working tree clean: {dirty if dirty is not None else 'unknown'}",
+        f"Working tree: {'dirty' if dirty is True else 'clean' if dirty is False else 'unknown'}",
         f"Data root: {data_root}",
         f"Artifact root: {artifact_root}",
         f"Paid data authorized: {paid}",
