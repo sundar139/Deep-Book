@@ -598,6 +598,13 @@ def execute_run(
 
     payload = outcome["predictions"]
     prediction_path = paths.predictions / f"{spec.run_id}.npz"
+    # ponytail: causal persistence marks first h predictions as -1; save only valid
+    if spec.model == "causal_persistence":
+        valid_mask = payload["y_pred"] >= 0
+        payload = {
+            key: value[valid_mask] if isinstance(value, np.ndarray) else value
+            for key, value in payload.items()
+        }
     save_prediction_artifact(
         prediction_path,
         y_true=payload["y_true"],
