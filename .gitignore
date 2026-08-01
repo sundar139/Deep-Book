@@ -20,7 +20,7 @@ data/processed/
 reports/results/
 artifacts/
 checkpoints/
-models/
+/models/
 mlruns/
 *.pt
 *.pth

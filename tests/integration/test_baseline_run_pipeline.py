@@ -19,8 +19,54 @@ from deepbook.evaluation.prediction import (
 from deepbook.training.fi2010 import (
     build_run_manifest,
     configuration_hash,
+    protocol_sha256,
+    resolve_protocol_commit,
     validate_run_manifest,
 )
+
+
+def _root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _minimal_manifest_kwargs(**overrides) -> dict:
+    root = _root()
+    return {
+        "run_id": "test-run",
+        "code_commit": "0" * 40,
+        "dirty": False,
+        "model": "test_model",
+        "setup": "anchored_forward",
+        "fold": 1,
+        "horizon": 10,
+        "seed": 1337,
+        "data_fingerprint": "test_fingerprint",
+        "configuration_hash": "a" * 64,
+        "configuration_path": "configs/experiments/fi2010/classical.yaml",
+        "status": "completed",
+        "metrics": {"accuracy": 0.5},
+        "run_kind": "smoke",
+        "eligible_for_confirmatory_report": False,
+        "exclusion_reasons": [],
+        "protocol_commit": resolve_protocol_commit(root),
+        "protocol_sha256": protocol_sha256(root),
+        "configured_max_epochs": None,
+        "actual_epochs_completed": None,
+        "best_epoch": None,
+        "termination_reason": "not_applicable",
+        "resumed": False,
+        "resumed_from_run_id": None,
+        "day_group": None,
+        "started_utc": "2026-01-01T00:00:00Z",
+        "completed_utc": "2026-01-01T00:01:00Z",
+        "archive_sha256": "c" * 64,
+        "training_file_sha256": "d" * 64,
+        "testing_file_sha256": "e" * 64,
+        "parameter_count": 0,
+        "device": "cpu",
+        "environment": {"python": "3.11"},
+        **overrides,
+    }
 
 
 def _make_synthetic_predictions(n: int = 200) -> dict[str, np.ndarray]:
@@ -94,7 +140,6 @@ class TestBaselineRunPipeline:
                 day_boundary_id=preds["day_boundary_id"],
             )
             pred_hash = sha256_file(pred_path)
-
             metrics = classification_metrics(
                 preds["y_true"], preds["y_pred"], preds["probabilities"]
             )
@@ -110,29 +155,37 @@ class TestBaselineRunPipeline:
                 seed=1337,
                 data_fingerprint="test_fingerprint",
                 configuration_hash=configuration_hash(config),
+                configuration_path="configs/experiments/fi2010/classical.yaml",
                 status="completed",
                 metrics={"test": metrics},
                 run_kind="smoke",
                 eligible_for_confirmatory_report=False,
                 exclusion_reasons=["test run"],
+                protocol_commit=resolve_protocol_commit(_root()),
+                protocol_sha256=protocol_sha256(_root()),
                 configured_max_epochs=50,
                 actual_epochs_completed=1,
+                best_epoch=None,
+                termination_reason="not_applicable",
+                resumed=False,
+                resumed_from_run_id=None,
+                day_group=None,
+                started_utc="2026-01-01T00:00:00Z",
+                completed_utc="2026-01-01T00:01:00Z",
+                archive_sha256="c" * 64,
+                training_file_sha256="d" * 64,
+                testing_file_sha256="e" * 64,
+                parameter_count=0,
+                device="cpu",
+                environment={"python": "3.11"},
                 prediction_sha256=pred_hash,
                 prediction_path=str(pred_path),
                 checkpoint_sha256=None,
                 checkpoint_path=None,
-                started_utc="2026-01-01T00:00:00Z",
-                completed_utc="2026-01-01T00:01:00Z",
             )
-            # Schema validation
-            schema_path = (
-                Path(__file__).resolve().parents[2]
-                / "data_contracts"
-                / "fi2010_run_manifest.schema.json"
-            )
+            schema_path = _root() / "data_contracts" / "fi2010_run_manifest.schema.json"
             validate_run_manifest(manifest, schema_path)
 
-            # Write manifest, read back, verify
             manifest_path = tmp / "manifest.json"
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
             reloaded = json.loads(manifest_path.read_text())
@@ -154,11 +207,24 @@ class TestBaselineRunPipeline:
             seed=1337,
             data_fingerprint="fp",
             configuration_hash="0" * 64,
+            configuration_path="",
             status="completed",
-            metrics={},
+            metrics={"accuracy": 0.5},
             run_kind="smoke",
             eligible_for_confirmatory_report=False,
             exclusion_reasons=["git tree is dirty"],
+            protocol_commit="",
+            protocol_sha256="",
+            termination_reason="not_applicable",
+            resumed=False,
+            archive_sha256="c" * 64,
+            training_file_sha256="d" * 64,
+            testing_file_sha256="e" * 64,
+            parameter_count=0,
+            started_utc="2026-01-01T00:00:00Z",
+            completed_utc="2026-01-01T00:01:00Z",
+            device="cpu",
+            environment={"python": "3.11"},
         )
         assert manifest["run_kind"] == "smoke"
         assert not manifest["eligible_for_confirmatory_report"]

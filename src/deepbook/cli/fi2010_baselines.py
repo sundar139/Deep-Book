@@ -15,10 +15,16 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from deepbook.evaluation.classification import classification_metrics
 from deepbook.evaluation.prediction import load_prediction_artifact, sha256_file
-from deepbook.training.fi2010 import validate_run_manifest
+from deepbook.training.fi2010 import (
+    check_protocol_ancestry,
+    configuration_hash,
+    protocol_sha256,
+    validate_run_manifest,
+)
 
 
 def _find_repo_root() -> Path:
@@ -49,69 +55,168 @@ def _cmd_report(root: Path) -> int:
     return 0
 
 
+_NEURAL_MODELS = {"mlplob", "deeplob"}
+_REQUIRED_METRIC_KEYS = frozenset(
+    {
+        "macro_f1",
+        "mcc",
+        "accuracy",
+        "balanced_accuracy",
+        "nll",
+        "brier",
+        "ece",
+        "confusion_matrix",
+        "classwise_precision",
+        "classwise_recall",
+        "classwise_f1",
+        "class_order",
+        "sample_count",
+    }
+)
+_RTOL = 1e-10
+_ATOL = 1e-8
+
+
+def _fail(msg: str) -> int:
+    print(f"ERROR: {msg}", file=sys.stderr)
+    return 1
+
+
 def _cmd_verify_run(root: Path, run_id: str) -> int:
-    """Load a run manifest, validate, hash-check artifacts, and recompute metrics."""
+    """Comprehensively verify a run manifest against its artifacts and protocol."""
     manifest_path = root / "artifacts" / "fi2010" / "baselines" / "runs" / f"{run_id}.json"
     if not manifest_path.is_file():
-        print(f"ERROR: run manifest not found: {manifest_path}", file=sys.stderr)
-        return 1
+        return _fail(f"run manifest not found: {manifest_path}")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # 1. Validate full manifest schema
     schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
     try:
         validate_run_manifest(manifest, schema_path)
     except Exception as exc:
-        print(f"ERROR: schema validation failed: {exc}", file=sys.stderr)
-        return 1
+        return _fail(f"schema validation failed: {exc}")
 
-    # Metrics tolerance
-    rtol = 1e-10
-    atol = 1e-8
+    # 2. Reject empty metrics
+    metrics_block = manifest.get("metrics", {})
+    if not metrics_block or not isinstance(metrics_block, dict):
+        return _fail("metrics block is empty or not a dict")
 
-    # Verify checkpoint SHA-256
+    # 3. Verify protocol SHA-256
+    recorded_protocol_hash = manifest.get("protocol_sha256", "")
+    current_protocol_hash = protocol_sha256(root)
+    if recorded_protocol_hash != current_protocol_hash:
+        return _fail(
+            f"protocol SHA-256 mismatch: manifest={recorded_protocol_hash[:16]}... "
+            f"current={current_protocol_hash[:16]}..."
+        )
+    print(f"Protocol SHA-256 verified: {current_protocol_hash[:16]}...")
+
+    # 4. Verify protocol ancestry
+    protocol_commit_val = manifest.get("protocol_commit", "")
+    if not check_protocol_ancestry(root, protocol_commit_val):
+        return _fail("code commit does not descend from protocol commit")
+    print(f"Protocol ancestry verified: {protocol_commit_val[:12]}...")
+
+    # 5. Verify configuration hash
+    config_path_str = manifest.get("configuration_path", "")
+    if config_path_str:
+        config_path = root / config_path_str
+        if config_path.is_file():
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            computed_config_hash = configuration_hash(config)
+            recorded_config_hash = manifest.get("configuration_hash", "")
+            if computed_config_hash != recorded_config_hash:
+                return _fail(
+                    f"configuration hash mismatch: manifest={recorded_config_hash[:16]}... "
+                    f"computed={computed_config_hash[:16]}..."
+                )
+            print(f"Configuration hash verified: {computed_config_hash[:16]}...")
+        else:
+            print(f"WARNING: configuration file not found: {config_path}")
+    else:
+        print("WARNING: no configuration_path in manifest; skipping config hash check")
+
+    # 6. Verify checkpoint
+    model_name = manifest.get("model", "")
+    is_neural = model_name in _NEURAL_MODELS
     checkpoint_path_str = manifest.get("checkpoint_path")
     checkpoint_sha = manifest.get("checkpoint_sha256")
+
+    if is_neural and not checkpoint_path_str:
+        return _fail("neural model requires checkpoint_path")
+    if is_neural and not checkpoint_sha:
+        return _fail("neural model requires checkpoint_sha256")
+
     if checkpoint_path_str:
         cp_path = Path(checkpoint_path_str)
         if not cp_path.is_file():
-            print(f"ERROR: checkpoint not found: {cp_path}", file=sys.stderr)
-            return 1
+            return _fail(f"checkpoint not found: {cp_path}")
         actual = sha256_file(cp_path)
         if checkpoint_sha and actual != checkpoint_sha:
-            print(
-                f"ERROR: checkpoint SHA-256 mismatch: manifest={checkpoint_sha} actual={actual}",
-                file=sys.stderr,
+            return _fail(
+                f"checkpoint SHA-256 mismatch: manifest={checkpoint_sha[:16]}... "
+                f"actual={actual[:16]}..."
             )
-            return 1
         print(f"Checkpoint SHA-256 verified: {actual[:16]}...")
     elif checkpoint_sha is not None:
-        print("Checkpoint SHA-256: null (model family has no checkpoint artifact)")
+        print("Checkpoint SHA-256 recorded as null (classical model)")
     else:
         print("Checkpoint SHA-256: not recorded")
 
-    # Verify prediction SHA-256
+    # 7. Verify prediction artifact
     pred_path_str = manifest.get("prediction_path")
     pred_sha = manifest.get("prediction_sha256")
     if pred_path_str and pred_sha:
         pp = Path(pred_path_str)
         if not pp.is_file():
-            print(f"ERROR: prediction artifact not found: {pp}", file=sys.stderr)
-            return 1
+            return _fail(f"prediction artifact not found: {pp}")
         actual = sha256_file(pp)
         if actual != pred_sha:
-            print(
-                f"ERROR: prediction SHA-256 mismatch: manifest={pred_sha} actual={actual}",
-                file=sys.stderr,
+            return _fail(
+                f"prediction SHA-256 mismatch: manifest={pred_sha[:16]}... actual={actual[:16]}..."
             )
-            return 1
         print(f"Prediction SHA-256 verified: {actual[:16]}...")
 
-        # Recompute metrics from prediction artifact
         preds = load_prediction_artifact(pp)
+
+        # Verify sample count
+        manifest_sample_count = manifest.get("sample_count")
+        pred_n = int(preds["y_true"].shape[0])
+        if manifest_sample_count is not None and manifest_sample_count != pred_n:
+            return _fail(
+                f"sample count mismatch: manifest={manifest_sample_count} prediction={pred_n}"
+            )
+        # All arrays have matching lengths
+        for key in ("y_pred", "probabilities", "sample_index", "source_file_id", "day_boundary_id"):
+            if preds[key].shape[0] != pred_n:
+                return _fail(
+                    f"prediction array {key} has wrong length: {preds[key].shape[0]} != {pred_n}"
+                )
+        # Class order
+        if tuple(preds.get("class_order", [])) != ("up", "stationary", "down"):
+            return _fail(f"class_order mismatch: {tuple(preds.get('class_order', []))}")
+
+        # Verify probabilities are valid
+        proba = np.asarray(preds["probabilities"], dtype=np.float64)
+        if not np.isfinite(proba).all():
+            return _fail("probabilities contain non-finite values")
+        if not np.allclose(proba.sum(axis=1), 1.0, atol=1e-8):
+            return _fail("probability rows do not sum to 1.0")
+
+        # 8. Recompute metrics
         recomputed = classification_metrics(
             preds["y_true"], preds["y_pred"], preds["probabilities"]
         )
-        manifest_metrics = manifest.get("metrics", {}).get("test", {})
+        manifest_metrics = metrics_block.get("test", {})
+        if not manifest_metrics:
+            return _fail("manifest test metrics are empty")
+
+        # Check required metric keys exist
+        for key in _REQUIRED_METRIC_KEYS:
+            if key not in manifest_metrics:
+                return _fail(f"required metric key missing from manifest: {key}")
+
         metric_keys = [
             "macro_f1",
             "mcc",
@@ -125,27 +230,35 @@ def _cmd_verify_run(root: Path, run_id: str) -> int:
             if key in manifest_metrics and key in recomputed:
                 expected = float(manifest_metrics[key])
                 actual_val = float(recomputed[key])
-                if not np.allclose(expected, actual_val, rtol=rtol, atol=atol):
-                    print(
-                        f"ERROR: metric mismatch for {key}: "
-                        f"manifest={expected:.12f} recomputed={actual_val:.12f}",
-                        file=sys.stderr,
+                if not np.allclose(expected, actual_val, rtol=_RTOL, atol=_ATOL):
+                    return _fail(
+                        f"metric mismatch for {key}: "
+                        f"manifest={expected:.12f} recomputed={actual_val:.12f}"
                     )
-                    return 1
                 print(f"  {key}: manifest={expected:.6f} recomputed={actual_val:.6f} OK")
         # Confusion matrix
         if "confusion_matrix" in manifest_metrics and "confusion_matrix" in recomputed:
             cm_manifest = np.array(manifest_metrics["confusion_matrix"], dtype=np.int64)
             cm_recomputed = np.array(recomputed["confusion_matrix"], dtype=np.int64)
             if not np.array_equal(cm_manifest, cm_recomputed):
-                print("ERROR: confusion matrix mismatch", file=sys.stderr)
-                return 1
+                return _fail("confusion matrix mismatch")
             print("  confusion_matrix OK")
+        # Class-level metrics
+        for arr_key in ("classwise_precision", "classwise_recall", "classwise_f1"):
+            if arr_key in manifest_metrics and arr_key in recomputed:
+                if not np.allclose(
+                    np.array(manifest_metrics[arr_key], dtype=np.float64),
+                    np.array(recomputed[arr_key], dtype=np.float64),
+                    rtol=_RTOL,
+                    atol=_ATOL,
+                ):
+                    return _fail(f"{arr_key} mismatch")
+                print(f"  {arr_key} OK")
         print("All metrics verified.")
     elif pred_path_str is None and pred_sha is None:
         print("No prediction artifact recorded.")
     else:
-        print("WARNING: prediction_path and prediction_sha256 inconsistent; skipping verification")
+        return _fail("prediction_path and prediction_sha256 inconsistent")
 
     print(f"Run {run_id} verification passed.")
     return 0

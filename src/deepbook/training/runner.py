@@ -32,17 +32,27 @@ from deepbook.training.data import FoldMatrices, labels_for_horizon, load_fold
 from deepbook.training.fi2010 import (
     SegmentedWindowDataset,
     build_run_manifest,
+    check_protocol_ancestry,
     chronological_training_validation_split,
     configuration_hash,
+    protocol_sha256,
     report_fingerprint,
+    resolve_protocol_commit,
     validate_run_manifest,
 )
 from deepbook.training.gates import tiny_batch_overfit_gate
-from deepbook.training.loop import evaluate_torch_classifier, fit_torch_classifier, predict_raw
+from deepbook.training.loop import (
+    evaluate_torch_classifier,
+    fit_torch_classifier,
+    predict_raw,
+)
 
 HORIZONS = (10, 20, 30, 50, 100)
 SEEDS = (1337, 2027, 31415, 424242, 8675309)
 CLASSICAL_MODELS = ("majority", "causal_persistence", "logistic_current_event", "random_forest")
+_DETERMINISTIC_CLASSICAL_MODELS = ("majority", "causal_persistence", "logistic_current_event")
+_STOCHASTIC_CLASSICAL_MODELS = ("random_forest",)
+_NEURAL_MODELS = ("mlplob", "deeplob")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -104,55 +114,99 @@ def _timed_predict(
     return predictions, elapsed * 1000.0 / max(1, len(features))
 
 
+def _classify_run(
+    run_kind_flag: str,
+    git_dirty: bool,
+    smoke_flag: bool,
+    status: str,
+    termination_reason: str,
+    actual_epochs: int | None,
+    configured_epochs: int | None,
+) -> tuple[str, bool, list[str]]:
+    """Determine run_kind, eligibility, and exclusion_reasons for a run."""
+    reasons: list[str] = []
+    if smoke_flag:
+        reasons.append("run explicitly marked as smoke")
+    if git_dirty:
+        reasons.append("git tree is dirty")
+    if status != "completed":
+        reasons.append(f"run status is {status}, not completed")
+    if termination_reason not in {"early_stopping", "max_epochs", "completed", "not_applicable"}:
+        reasons.append(f"invalid termination reason: {termination_reason}")
+
+    eligible = not bool(reasons) and not smoke_flag
+    run_kind = smoke_flag and "smoke" or (eligible and "confirmatory" or "smoke")
+    return run_kind, eligible, reasons
+
+
 def _base_manifest(
     *,
     root: Path,
     run_id: str,
     config: dict[str, Any],
-    fold: int,
+    config_path: str,
+    fold: int | None,
+    day_group: str | None,
     horizon: int,
     seed: int,
     data: FoldMatrices,
     model: str,
     status: str,
     metrics: dict[str, Any],
-    max_epochs: int | None = None,
+    configured_epochs: int | None = None,
     actual_epochs: int | None = None,
+    best_epoch: int | None = None,
+    termination_reason: str = "not_applicable",
     smoke: bool = False,
+    resumed: bool = False,
+    resumed_from: str | None = None,
     **details: Any,
 ) -> dict[str, Any]:
     commit, dirty = _git_state(root)
-    configured_epochs = max_epochs or int(config.get("training", {}).get("max_epochs", 50))
-    exclusion_reasons: list[str] = []
-    if smoke:
-        exclusion_reasons.append("run explicitly marked as smoke")
-    if dirty:
-        exclusion_reasons.append("git tree is dirty")
-    if actual_epochs is not None and actual_epochs < configured_epochs:
-        exclusion_reasons.append(
-            f"actual_epochs_completed={actual_epochs} < configured_max_epochs={configured_epochs}"
-        )
-    eligible = not bool(exclusion_reasons) and not smoke
-    run_kind: str = "smoke" if smoke else ("confirmatory" if eligible else "smoke")
+    protocol_commit_val = resolve_protocol_commit(root)
+    protocol_hash = protocol_sha256(root)
+    run_kind, eligible, reasons = _classify_run(
+        smoke and "smoke" or "confirmatory",
+        dirty,
+        smoke,
+        status,
+        termination_reason,
+        actual_epochs,
+        configured_epochs,
+    )
+    # Verify protocol ancestry
+    if eligible and not check_protocol_ancestry(root, protocol_commit_val):
+        eligible = False
+        reasons.append("code commit does not descend from protocol commit")
+        run_kind = "smoke"
+
     started_utc = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     return build_run_manifest(
         run_id=run_id,
         code_commit=commit,
         dirty=dirty,
         model=model,
-        setup="anchored_forward",
+        setup=fold is not None and "anchored_forward" or "first_seven_final_three",
         fold=fold,
+        day_group=day_group,
         horizon=horizon,
         seed=seed,
         data_fingerprint=data.data_fingerprint,
         configuration_hash=configuration_hash(config),
+        configuration_path=config_path,
         status=status,
         metrics=metrics,
         run_kind=run_kind,
         eligible_for_confirmatory_report=eligible,
-        exclusion_reasons=exclusion_reasons,
+        exclusion_reasons=reasons,
+        protocol_commit=protocol_commit_val,
+        protocol_sha256=protocol_hash,
         configured_max_epochs=configured_epochs,
         actual_epochs_completed=actual_epochs,
+        best_epoch=best_epoch,
+        termination_reason=termination_reason,
+        resumed=resumed,
+        resumed_from_run_id=resumed_from,
         archive_sha256=data.archive_sha256,
         training_file_sha256=data.training_file_sha256,
         testing_file_sha256=data.testing_file_sha256,
@@ -164,6 +218,9 @@ def _base_manifest(
     )
 
 
+# --- Classical run ---
+
+
 def _classical_run(
     root: Path,
     model_name: str,
@@ -173,9 +230,10 @@ def _classical_run(
     *,
     smoke: bool = False,
 ) -> dict[str, Any]:
-    config_path = root / "configs" / "experiments" / "fi2010" / "classical.yaml"
-    config = _load_yaml(config_path)
-    data = load_fold(root, fold, experiment_config_path=config_path.relative_to(root))
+    config_path = "configs/experiments/fi2010/classical.yaml"
+    full_config_path = root / config_path
+    config = _load_yaml(full_config_path)
+    data = load_fold(root, fold, experiment_config_path=Path(config_path))
     horizon_index = HORIZONS.index(horizon)
     train_features = data.training_features.T
     test_features = data.testing_features.T
@@ -245,15 +303,20 @@ def _classical_run(
         parameters = int(sum(tree.tree_.node_count for tree in model.estimator.estimators_))
     else:
         raise ValueError(f"unknown classical model: {model_name}")
+
+    # Remove invalid predictions for metrics only
+    valid_test = test_predictions >= 0
+    if not np.any(valid_test):
+        raise ValueError("classical model produced no valid test predictions")
+    test_metrics = classification_metrics(
+        test_labels[valid_test], test_predictions[valid_test], test_probabilities[valid_test]
+    )
     validation_metrics = _metrics_with_valid_predictions(
         train_labels[validation_indices], validation_predictions, validation_probabilities
     )
-    test_metrics = _metrics_with_valid_predictions(
-        test_labels, test_predictions, test_probabilities
-    )
     completed_utc = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     run_id = f"{model_name}-anchored-forward-f{fold}-h{horizon}-s{seed}"
-    # Save prediction artifact
+    # Save prediction artifact with real boundary IDs
     pred_path = root / "artifacts" / "fi2010" / "baselines" / "predictions" / f"{run_id}.npz"
     n_test = len(test_labels)
     save_prediction_artifact(
@@ -263,14 +326,16 @@ def _classical_run(
         probabilities=test_probabilities.astype(np.float64),
         sample_index=np.arange(n_test, dtype=np.int64),
         source_file_id=np.full(n_test, fold, dtype=np.int64),
-        day_boundary_id=np.zeros(n_test, dtype=np.int64),
+        day_boundary_id=np.full(n_test, fold, dtype=np.int64),
     )
     pred_hash = sha256_file(pred_path)
     return _base_manifest(
         root=root,
         run_id=run_id,
         config=config,
+        config_path=config_path,
         fold=fold,
+        day_group=None,
         horizon=horizon,
         seed=seed,
         data=data,
@@ -278,7 +343,10 @@ def _classical_run(
         status="completed",
         metrics={"validation": validation_metrics, "test": test_metrics},
         smoke=smoke,
-        actual_epochs=1,
+        configured_epochs=None,
+        actual_epochs=None,
+        best_epoch=None,
+        termination_reason="not_applicable",
         training_seconds=time.perf_counter() - started,
         total_wall_seconds=time.perf_counter() - started,
         inference_latency_ms_per_sample={"validation": validation_latency, "test": test_latency},
@@ -290,11 +358,16 @@ def _classical_run(
         checkpoint_path=None,
         prediction_sha256=pred_hash,
         prediction_path=str(pred_path),
+        sample_count=n_test,
+        class_order=["up", "stationary", "down"],
         command=" ".join(sys.argv),
         exit_code=0,
         completed_utc=completed_utc,
         device="cpu",
     )
+
+
+# --- Neural run ---
 
 
 def _neural_run(
@@ -307,11 +380,13 @@ def _neural_run(
     max_epochs: int | None,
     *,
     smoke: bool = False,
+    resume_from: str | None = None,
 ) -> dict[str, Any]:
     config_name = "mlplob" if model_name == "mlplob" else "deeplob"
-    config_path = root / "configs" / "experiments" / "fi2010" / f"{config_name}.yaml"
-    config = _load_yaml(config_path)
-    data = load_fold(root, fold, experiment_config_path=config_path.relative_to(root))
+    config_path = f"configs/experiments/fi2010/{config_name}.yaml"
+    full_config_path = root / config_path
+    config = _load_yaml(full_config_path)
+    data = load_fold(root, fold, experiment_config_path=Path(config_path))
     horizon_index = HORIZONS.index(horizon)
     sequence_length = int(config["sequence_length"])
     train_labels = data.training_labels
@@ -387,6 +462,8 @@ def _neural_run(
         checkpoint_path=checkpoint_path,
         configuration_hash=configuration_hash(config),
         data_fingerprint=data.data_fingerprint,
+        protocol_hash=protocol_sha256(root),
+        resume_from=Path(resume_from) if resume_from else None,
     )
     test_metrics, test_latency = evaluate_torch_classifier(
         model,
@@ -403,32 +480,40 @@ def _neural_run(
         model, test_dataset, target_device, int(config["training"]["batch_size"])
     )
     pred_path = root / "artifacts" / "fi2010" / "baselines" / "predictions" / f"{run_id}.npz"
+    n_test = len(true_vals)
     save_prediction_artifact(
         pred_path,
         y_true=true_vals.astype(np.int64),
         y_pred=pred_vals.astype(np.int64),
         probabilities=probas.astype(np.float64),
-        sample_index=np.arange(len(true_vals), dtype=np.int64),
-        source_file_id=np.full(len(true_vals), fold, dtype=np.int64),
-        day_boundary_id=np.zeros(len(true_vals), dtype=np.int64),
+        sample_index=np.arange(n_test, dtype=np.int64),
+        source_file_id=np.full(n_test, fold, dtype=np.int64),
+        day_boundary_id=np.full(n_test, fold, dtype=np.int64),
     )
     pred_hash = sha256_file(pred_path)
     chk_hash = sha256_file(checkpoint_path) if checkpoint_path.is_file() else None
+
+    termination = "early_stopping" if fit_result.best_epoch < configured_epochs else "max_epochs"
     return _base_manifest(
         root=root,
         run_id=run_id,
         config=config,
+        config_path=config_path,
         fold=fold,
+        day_group=None,
         horizon=horizon,
         seed=seed,
         data=data,
         model=model_name,
         status="completed",
         metrics={"validation": fit_result.validation_metrics, "test": test_metrics},
-        max_epochs=configured_epochs,
+        configured_epochs=configured_epochs,
         actual_epochs=fit_result.best_epoch,
-        smoke=smoke,
         best_epoch=fit_result.best_epoch,
+        termination_reason=termination,
+        smoke=smoke,
+        resumed=bool(resume_from),
+        resumed_from=resume_from,
         training_seconds=fit_result.training_seconds,
         total_wall_seconds=time.perf_counter() - started,
         inference_latency_ms_per_sample={
@@ -446,11 +531,16 @@ def _neural_run(
         checkpoint_path=str(checkpoint_path) if checkpoint_path.is_file() else None,
         prediction_sha256=pred_hash,
         prediction_path=str(pred_path),
+        sample_count=n_test,
+        class_order=["up", "stationary", "down"],
         device=selected_device,
         command=" ".join(sys.argv),
         exit_code=0,
         completed_utc=completed_utc,
     )
+
+
+# --- Persistence ---
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -467,6 +557,19 @@ def _record_run(root: Path, manifest: dict[str, Any]) -> Path:
     return path
 
 
+# --- Per-model seed configuration ---
+
+
+def _seeds_for_model(model: str) -> tuple[int, ...]:
+    """Return the declared seed tuple for a given model."""
+    if model in _DETERMINISTIC_CLASSICAL_MODELS:
+        return (SEEDS[0],)  # only seed 1337 for deterministic models
+    return SEEDS  # all five for stochastic models and neural models
+
+
+# --- Run index (authoritative, deterministic) ---
+
+
 def generate_run_index(root: Path) -> dict[str, Any]:
     """Generate a deterministic run index from run manifests with audit checks."""
     run_root = root / "artifacts" / "fi2010" / "baselines" / "runs"
@@ -475,49 +578,57 @@ def generate_run_index(root: Path) -> dict[str, Any]:
 
     manifests_by_id: dict[str, dict[str, Any]] = {}
     run_ids_seen: set[str] = set()
-    for manifest_path in sorted(run_root.glob("*.json")):
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        rid = manifest["run_id"]
-        if rid in run_ids_seen:
-            raise ValueError(f"duplicate run_id in manifests: {rid}")
-        run_ids_seen.add(rid)
-        manifests_by_id[rid] = manifest
+    if run_root.is_dir():
+        for manifest_path in sorted(run_root.glob("*.json")):
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            rid = manifest["run_id"]
+            if rid in run_ids_seen:
+                raise ValueError(f"duplicate run_id in manifests: {rid}")
+            run_ids_seen.add(rid)
+            manifests_by_id[rid] = manifest
 
-    # Detect orphan checkpoints
+    # Detect orphans
     orphan_checkpoints: list[str] = []
     if checkpoint_root.is_dir():
-        for cp in sorted(checkpoint_root.iterdir()):
-            if cp.suffix in {".pt", ".pth"}:
-                orphan_checkpoints.append(cp.name)
-
-    # Detect orphan predictions
+        orphan_checkpoints = sorted(
+            cp.name for cp in checkpoint_root.iterdir() if cp.suffix in {".pt", ".pth"}
+        )
     orphan_predictions: list[str] = []
     if prediction_root.is_dir():
-        for pp in sorted(prediction_root.iterdir()):
-            if pp.suffix == ".npz":
-                orphan_predictions.append(pp.name)
+        orphan_predictions = sorted(
+            pp.name for pp in prediction_root.iterdir() if pp.suffix == ".npz"
+        )
 
-    # Planned Cartesian coverage
+    # Planned Cartesian coverage per model configuration
+    all_models = CLASSICAL_MODELS + _NEURAL_MODELS
     planned_cells: set[str] = set()
-    for model in CLASSICAL_MODELS + ("mlplob", "deeplob"):
+    for model in all_models:
+        model_seeds = _seeds_for_model(model)
         for fold in range(1, 10):
             for horizon in HORIZONS:
-                for seed in SEEDS:
-                    planned_cells.add(f"{model}-anchored-forward-f{fold}-h{horizon}-s{seed}")
+                for seed_val in model_seeds:
+                    planned_cells.add(f"{model}-anchored-forward-f{fold}-h{horizon}-s{seed_val}")
 
+    # Classify existing runs
     completed_confirmatory: set[str] = set()
     completed_smoke: set[str] = set()
     failed: set[str] = set()
+    interrupted: set[str] = set()
+    duplicates: list[str] = []
+
     for rid, m in manifests_by_id.items():
-        if m.get("status") == "completed":
+        status = m.get("status", "")
+        if status == "completed":
             if m.get("eligible_for_confirmatory_report"):
                 completed_confirmatory.add(rid)
             else:
                 completed_smoke.add(rid)
-        elif m.get("status") in {"failed", "interrupted"}:
+        elif status == "failed":
             failed.add(rid)
+        elif status == "interrupted":
+            interrupted.add(rid)
 
-    index_entries: list[dict[str, Any]] = []
+    # Cross-reference checkpoints and predictions
     for rid in sorted(manifests_by_id):
         m = manifests_by_id[rid]
         cp_path = m.get("checkpoint_path", "")
@@ -531,6 +642,10 @@ def generate_run_index(root: Path) -> dict[str, Any]:
             if pp_name in orphan_predictions:
                 orphan_predictions.remove(pp_name)
 
+    # Build index entries
+    index_entries: list[dict[str, Any]] = []
+    for rid in sorted(manifests_by_id):
+        m = manifests_by_id[rid]
         index_entries.append(
             {
                 "run_id": rid,
@@ -547,9 +662,11 @@ def generate_run_index(root: Path) -> dict[str, Any]:
                 "seed": m.get("seed"),
                 "status": m.get("status", ""),
                 "exit_code": m.get("exit_code"),
+                "termination_reason": m.get("termination_reason"),
                 "protocol_commit": m.get("protocol_commit"),
+                "protocol_sha256": m.get("protocol_sha256"),
                 "code_commit": m.get("code_commit"),
-                "git_tree_dirty": m.get("git_tree_dirty", False),
+                "git_tree_dirty": m.get("git_tree_dirty", m.get("dirty", False)),
                 "configuration_hash": m.get("configuration_hash", ""),
                 "data_fingerprint": m.get("data_fingerprint", ""),
                 "checkpoint_sha256": m.get("checkpoint_sha256"),
@@ -563,27 +680,42 @@ def generate_run_index(root: Path) -> dict[str, Any]:
             }
         )
 
+    # Derive timestamp from latest manifest completion or protocol freeze time
+    latest_completed = ""
+    for m in manifests_by_id.values():
+        cu = m.get("completed_utc", "")
+        if cu > latest_completed:
+            latest_completed = cu
+
     return {
         "schema_version": 1,
-        "generated_utc": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_from_manifests_utc": latest_completed or None,
         "total_manifest_count": len(manifests_by_id),
         "planned_cells": sorted(planned_cells),
         "completed_confirmatory": sorted(completed_confirmatory),
         "completed_smoke": sorted(completed_smoke),
         "failed": sorted(failed),
+        "interrupted": sorted(interrupted),
         "missing_manifests": sorted(planned_cells - set(manifests_by_id)),
+        "duplicate_run_ids": sorted(duplicates),
         "orphan_checkpoints": orphan_checkpoints,
         "orphan_predictions": orphan_predictions,
         "runs": index_entries,
     }
 
 
+# --- Report generation (deterministic) ---
+
+
 def write_report(root: Path) -> tuple[Path, Path]:
     """Aggregate ignored run manifests into deterministic JSON and Markdown reports."""
     run_root = root / "artifacts" / "fi2010" / "baselines" / "runs"
-    manifests = [
-        json.loads(path.read_text(encoding="utf-8")) for path in sorted(run_root.glob("*.json"))
-    ]
+    manifests: list[dict[str, Any]] = []
+    if run_root.is_dir():
+        manifests = sorted(
+            (json.loads(p.read_text(encoding="utf-8")) for p in run_root.glob("*.json")),
+            key=lambda m: m.get("run_id", ""),
+        )
     confirmatory = [
         m
         for m in manifests
@@ -595,13 +727,14 @@ def write_report(root: Path) -> tuple[Path, Path]:
         if not m.get("eligible_for_confirmatory_report", False)
         or m.get("run_kind") in {"smoke", None}
     ]
+    # Aggregate by model/setup/horizon
     grouped: dict[str, list[float]] = defaultdict(list)
     for manifest in confirmatory:
         test_metrics = manifest.get("metrics", {}).get("test", {})
         if "macro_f1" in test_metrics:
-            grouped[f"{manifest['model']}:h{manifest['horizon']}"].append(
-                float(test_metrics["macro_f1"])
-            )
+            key = f"{manifest['model']}|{manifest.get('setup', '')}|h{manifest['horizon']}"
+            grouped[key].append(float(test_metrics["macro_f1"]))
+
     summary: dict[str, dict[str, Any]] = {}
     for key, macro_f1_values in sorted(grouped.items()):
         entry: dict[str, Any] = {
@@ -613,26 +746,35 @@ def write_report(root: Path) -> tuple[Path, Path]:
         else:
             entry["std_macro_f1"] = "unavailable"
         summary[key] = entry
-    tiny_gates = [
-        {
-            "run_id": manifest["run_id"],
-            "model": manifest["model"],
-            "result": manifest.get("tiny_batch_overfit", {}),
-        }
-        for manifest in manifests
-        if manifest.get("tiny_batch_overfit", {}).get("status") not in {"not_run", "not_applicable"}
-    ]
-    smoke_summary = [
-        {
-            "run_id": m["run_id"],
-            "run_kind": m.get("run_kind", "smoke"),
-            "exclusion_reasons": m.get("exclusion_reasons", []),
-        }
-        for m in smoke
-    ]
+
+    tiny_gates = sorted(
+        (
+            {
+                "run_id": m["run_id"],
+                "model": m["model"],
+                "result": m.get("tiny_batch_overfit", {}),
+            }
+            for m in manifests
+            if m.get("tiny_batch_overfit", {}).get("status") not in {"not_run", "not_applicable"}
+        ),
+        key=lambda g: g["run_id"],
+    )
+    smoke_exclusion = sorted(
+        (
+            {
+                "run_id": m["run_id"],
+                "run_kind": m.get("run_kind", "smoke"),
+                "exclusion_reasons": m.get("exclusion_reasons", []),
+            }
+            for m in smoke
+        ),
+        key=lambda s: s["run_id"],
+    )
+
+    run_index = generate_run_index(root)
+
     report: dict[str, Any] = {
         "schema_version": 1,
-        "generated_utc": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "scope": "local FI-2010 reproduction; not publisher-verified",
         "data_contract": {
             "archive_sha256": "cea93692a270724fa91e8f124da641db727d757e5e0f0bb85067709e9932f664",
@@ -653,30 +795,18 @@ def write_report(root: Path) -> tuple[Path, Path]:
             "paper": "arxiv:1808.03668v6",
             "official_repository_commit": "ff14d7c2fd38bdfc143389786993d0f0236d4eb8",
             "local_results_are_not_publisher_verified": True,
-            "unresolved_discrepancies": [
-                (
-                    "The local archive exposes aggregate processed matrices; exact "
-                    "per-observation day, instrument, timestamp, order identity, "
-                    "queue position, and message-stream boundaries are unavailable."
-                ),
-                (
-                    "Paper/reference values use their published setup and implementation; "
-                    "local manifests record the local folds, labels, normalization, seeds, "
-                    "software, and hardware for discrepancy analysis."
-                ),
-            ],
         },
         "confirmatory_runs": confirmatory,
         "smoke_runs": smoke,
-        "smoke_exclusion_summary": smoke_summary,
+        "smoke_exclusion_summary": smoke_exclusion,
         "summary": summary,
         "gates": {
             "tiny_batch_overfit": tiny_gates,
-            "all_passed": all(bool(gate["result"].get("passed")) for gate in tiny_gates),
+            "all_passed": all(bool(g["result"].get("passed")) for g in tiny_gates),
         },
         "failed_runs": [m for m in manifests if m.get("status") == "failed"],
         "resumed_runs": [m for m in manifests if m.get("resumed")],
-        "run_index": generate_run_index(root),
+        "run_index": run_index,
     }
     report["report_fingerprint"] = report_fingerprint(report)
     json_path = root / "reports" / "results" / "fi2010_baseline_reproduction.json"
@@ -686,7 +816,7 @@ def write_report(root: Path) -> tuple[Path, Path]:
     confirmatory_count = len(confirmatory)
     smoke_count = len(smoke)
     failed_count = len(report["failed_runs"])
-    lines = [
+    markdown_lines = [
         "# FI-2010 Baseline Reproduction Results",
         "",
         (
@@ -705,7 +835,7 @@ def write_report(root: Path) -> tuple[Path, Path]:
     ]
 
     if confirmatory_count == 0:
-        lines.extend(
+        markdown_lines.extend(
             [
                 "**Confirmatory matrix not started.**",
                 "",
@@ -713,7 +843,7 @@ def write_report(root: Path) -> tuple[Path, Path]:
         )
 
     if smoke_count > 0:
-        lines.extend(
+        markdown_lines.extend(
             [
                 "## Engineering smoke runs excluded from confirmatory analysis",
                 "",
@@ -721,51 +851,51 @@ def write_report(root: Path) -> tuple[Path, Path]:
                 "|---|---|",
             ]
         )
-        for sm in smoke_summary[:20]:
+        for sm in smoke_exclusion[:20]:
             reasons_str = "; ".join(sm.get("exclusion_reasons", [])) or "pre-freeze / legacy"
-            lines.append(f"| {sm['run_id']} | {reasons_str} |")
+            markdown_lines.append(f"| {sm['run_id']} | {reasons_str} |")
         if smoke_count > 20:
-            lines.append(f"| ... and {smoke_count - 20} more | |")
-        lines.append("")
+            markdown_lines.append(f"| ... and {smoke_count - 20} more | |")
+        markdown_lines.append("")
 
     if confirmatory_count > 0:
-        lines.extend(
+        markdown_lines.extend(
             [
                 "## Confirmatory macro-F1 summary",
                 "",
-                "| Model/horizon | Runs | Mean | Std |",
+                "| Model/Setup/Horizon | Runs | Mean | Std |",
                 "|---|---:|---:|---:|",
             ]
         )
-        for key in summary:
-            values = summary[key]
+        for key, values in summary.items():
             std_str = (
                 f"{values['std_macro_f1']:.6f}"
                 if isinstance(values["std_macro_f1"], float)
                 else str(values["std_macro_f1"])
             )
-            lines.append(
+            markdown_lines.append(
                 f"| {key} | {values['count']} | {values['mean_macro_f1']:.6f} | {std_str} |"
             )
 
-    lines.extend(
+    markdown_lines.extend(
         [
             "",
-            (
-                "Full metrics, confusion matrices, timing, memory, manifests, failures, "
-                "and commands are in the JSON report."
-            ),
+            "Full metrics, confusion matrices, timing, memory, manifests, failures, "
+            "and commands are in the JSON report.",
             "",
         ]
     )
     markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    markdown_path.write_text("\n".join(markdown_lines), encoding="utf-8")
     return json_path, markdown_path
+
+
+# --- CLI ---
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run audited FI-2010 baselines")
-    parser.add_argument("--model", choices=CLASSICAL_MODELS + ("mlplob", "deeplob"))
+    parser.add_argument("--model", choices=CLASSICAL_MODELS + _NEURAL_MODELS)
     parser.add_argument("--fold", type=int, default=1)
     parser.add_argument("--horizon", type=int, choices=HORIZONS, default=100)
     parser.add_argument("--seed", type=int, default=1337)
@@ -795,7 +925,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--model is required unless --report-only is supplied")
     folds = range(1, 10) if args.matrix else (args.fold,)
     horizons = HORIZONS if args.matrix else (args.horizon,)
-    seeds = SEEDS if args.matrix and args.model in {"mlplob", "deeplob"} else (args.seed,)
+    model_seeds = _seeds_for_model(args.model)
+    seeds = model_seeds if args.matrix and len(model_seeds) > 1 else (args.seed,)
     failures = 0
     for fold in folds:
         for horizon in horizons:
@@ -821,23 +952,20 @@ def main(argv: list[str] | None = None) -> int:
                     failures += 1
                     try:
                         data = load_fold(root, fold)
-                        config_path = (
-                            root
-                            / "configs"
-                            / "experiments"
-                            / "fi2010"
-                            / (
-                                "classical.yaml"
-                                if args.model in CLASSICAL_MODELS
-                                else f"{args.model}.yaml"
-                            )
+                        config_path_part = (
+                            "classical.yaml"
+                            if args.model in CLASSICAL_MODELS
+                            else f"{args.model}.yaml"
                         )
-                        config = _load_yaml(config_path)
+                        config_path = f"configs/experiments/fi2010/{config_path_part}"
+                        config = _load_yaml(root / config_path)
                         manifest = _base_manifest(
                             root=root,
                             run_id=run_id,
                             config=config,
+                            config_path=config_path,
                             fold=fold,
+                            day_group=None,
                             horizon=horizon,
                             seed=seed,
                             data=data,
@@ -845,6 +973,7 @@ def main(argv: list[str] | None = None) -> int:
                             status="failed",
                             metrics={},
                             smoke=args.smoke,
+                            termination_reason="failed",
                             error=f"{type(error).__name__}: {error}",
                             command=" ".join(sys.argv),
                             exit_code=1,
@@ -859,7 +988,6 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                 path = _record_run(root, manifest)
                 print(f"Run {manifest['status']}: {path}")
-    # Generate run index and report
     index = generate_run_index(root)
     index_path = root / "artifacts" / "fi2010" / "baselines" / "run_index.json"
     _write_json(index_path, index)

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+import subprocess
 from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,51 @@ from typing import Any
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+# ponytail: frozen contract files — paths relative to repo root
+_PROTOCOL_CONTRACT_PATHS = (
+    "reports/protocol/fi2010_baseline_reproduction.md",
+    "configs/references/deeplob_fi2010.yaml",
+    "configs/experiments/fi2010/classical.yaml",
+    "configs/experiments/fi2010/mlplob.yaml",
+    "configs/experiments/fi2010/deeplob.yaml",
+)
+
+
+def resolve_protocol_commit(root: Path) -> str:
+    """Return the latest Git commit touching any frozen protocol/config/reference file."""
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", *_PROTOCOL_CONTRACT_PATHS],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def protocol_sha256(root: Path) -> str:
+    """Return a deterministic canonical SHA-256 of the complete frozen contract files."""
+    lines: list[str] = []
+    for rel in sorted(_PROTOCOL_CONTRACT_PATHS):
+        p = root / rel
+        if not p.is_file():
+            raise FileNotFoundError(f"protocol contract file missing: {rel}")
+        lines.append(f"{rel}:{p.read_bytes().hex()}")
+    payload = "\n".join(lines)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def check_protocol_ancestry(root: Path, protocol_commit: str) -> bool:
+    """Return True when HEAD descends from the given protocol commit."""
+    if not protocol_commit or len(protocol_commit) != 40:
+        return False
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", protocol_commit, "HEAD"],
+        cwd=root,
+        capture_output=True,
+    )
+    return result.returncode == 0
 
 
 def configuration_hash(configuration: Any) -> str:
@@ -29,7 +75,7 @@ def report_fingerprint(report: Any) -> str:
     stable_report = {
         key: value
         for key, value in report.items()
-        if key not in {"generated_utc", "report_fingerprint"}
+        if key not in {"generated_utc", "report_fingerprint", "generated_from_manifests_utc"}
     }
     return configuration_hash(stable_report)
 
@@ -74,6 +120,14 @@ def build_run_manifest(
     exclusion_reasons: list[str] | None = None,
     configured_max_epochs: int | None = None,
     actual_epochs_completed: int | None = None,
+    best_epoch: int | None = None,
+    termination_reason: str = "not_applicable",
+    protocol_commit: str = "",
+    protocol_sha256: str = "",
+    configuration_path: str = "",
+    resumed: bool = False,
+    resumed_from_run_id: str | None = None,
+    day_group: str | None = None,
     started_utc: str = "",
     **details: Any,
 ) -> dict[str, Any]:
@@ -84,18 +138,26 @@ def build_run_manifest(
         "run_kind": run_kind,
         "eligible_for_confirmatory_report": eligible_for_confirmatory_report,
         "exclusion_reasons": exclusion_reasons or [],
+        "protocol_commit": protocol_commit,
+        "protocol_sha256": protocol_sha256,
         "code_commit": code_commit,
         "git_tree_dirty": dirty,
         "model": model,
         "setup": setup,
         "fold": fold,
+        "day_group": day_group,
         "horizon": horizon,
         "seed": seed,
         "data_fingerprint": data_fingerprint,
         "configuration_hash": configuration_hash,
+        "configuration_path": configuration_path,
         "configured_max_epochs": configured_max_epochs,
         "actual_epochs_completed": actual_epochs_completed,
+        "best_epoch": best_epoch,
+        "termination_reason": termination_reason,
         "status": status,
+        "resumed": resumed,
+        "resumed_from_run_id": resumed_from_run_id,
         "started_utc": started_utc,
         "metrics": metrics,
     }
@@ -290,6 +352,9 @@ def save_checkpoint_atomic(
     configuration_hash: str,
     data_fingerprint: str,
     best_validation_metric: float,
+    best_epoch: int = 0,
+    patience_counter: int = 0,
+    protocol_hash: str = "",
 ) -> None:
     """Atomically save a complete resumable training state."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -302,7 +367,15 @@ def save_checkpoint_atomic(
         "configuration_hash": configuration_hash,
         "data_fingerprint": data_fingerprint,
         "best_validation_metric": best_validation_metric,
+        "best_epoch": best_epoch or epoch,
+        "patience_counter": patience_counter,
+        "protocol_hash": protocol_hash,
+        "python_rng": random.getstate(),
+        "numpy_rng": np.random.get_state(),
+        "torch_rng": torch.random.get_rng_state(),
     }
+    if torch.cuda.is_available():
+        payload["cuda_rng"] = torch.cuda.get_rng_state_all()
     torch.save(payload, temporary)
     temporary.replace(path)
 
@@ -315,4 +388,13 @@ def load_checkpoint(
     model.load_state_dict(payload["model"])
     if optimizer is not None:
         optimizer.load_state_dict(payload["optimizer"])
+    # Restore RNG state if present
+    if "python_rng" in payload:
+        random.setstate(payload["python_rng"])
+    if "numpy_rng" in payload:
+        np.random.set_state(payload["numpy_rng"])
+    if "torch_rng" in payload:
+        torch.random.set_rng_state(payload["torch_rng"])
+    if "cuda_rng" in payload and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(payload["cuda_rng"])
     return {key: payload[key] for key in payload if key not in {"model", "optimizer"}}

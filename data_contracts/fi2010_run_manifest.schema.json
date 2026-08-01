@@ -1,73 +1,332 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FI-2010 baseline run manifest",
-  "description": "Schema for every planned, running, completed, or failed baseline run manifest.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "run_id",
-    "code_commit",
+    "run_kind",
+    "eligible_for_confirmatory_report",
+    "exclusion_reasons",
     "model",
     "setup",
     "horizon",
     "seed",
-    "data_fingerprint",
-    "configuration_hash",
     "status",
-    "metrics"
+    "metrics",
+    "protocol_commit",
+    "protocol_sha256",
+    "code_commit",
+    "git_tree_dirty",
+    "configuration_path",
+    "configuration_hash",
+    "data_fingerprint",
+    "archive_sha256",
+    "training_file_sha256",
+    "testing_file_sha256",
+    "termination_reason",
+    "parameter_count",
+    "started_utc",
+    "completed_utc",
+    "resumed",
+    "device",
+    "environment"
   ],
   "properties": {
-    "schema_version": {"const": 1},
-    "run_id": {"type": "string", "minLength": 1, "pattern": "^[a-zA-Z0-9_\\-]+$"},
-    "run_kind": {"enum": ["smoke", "confirmatory", "diagnostic"]},
-    "eligible_for_confirmatory_report": {"type": "boolean"},
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9_\\-]+$"
+    },
+    "run_kind": {
+      "enum": [
+        "smoke",
+        "confirmatory",
+        "diagnostic"
+      ]
+    },
+    "eligible_for_confirmatory_report": {
+      "type": "boolean"
+    },
     "exclusion_reasons": {
       "type": "array",
-      "items": {"type": "string"}
+      "items": {
+        "type": "string"
+      }
     },
-    "protocol_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
-    "code_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "git_tree_dirty": {"type": "boolean"},
-    "dirty": {"type": "boolean"},
-    "model": {"type": "string", "minLength": 1},
-    "setup": {"enum": ["anchored_forward", "first_seven_final_three"]},
-    "fold": {"type": ["integer", "null"], "minimum": 1},
-    "day_group": {"type": ["string", "null"]},
-    "horizon": {"enum": [10, 20, 30, 50, 100]},
-    "seed": {"type": "integer"},
-    "data_fingerprint": {"type": "string", "minLength": 1},
-    "archive_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "training_file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "testing_file_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "configuration_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "configured_max_epochs": {"type": ["integer", "null"], "minimum": 1},
-    "actual_epochs_completed": {"type": ["integer", "null"], "minimum": 0},
-    "best_epoch": {"type": ["integer", "null"], "minimum": 1},
-    "status": {"enum": ["planned", "running", "completed", "failed", "interrupted"]},
-    "exit_code": {"type": ["integer", "null"]},
-    "resumed": {"type": "boolean"},
-    "resumed_from_run_id": {"type": ["string", "null"]},
-    "started_utc": {"type": "string"},
-    "completed_utc": {"type": "string"},
-    "metrics": {"type": "object"},
-    "prediction_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "checkpoint_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
-    "checkpoint_path": {"type": ["string", "null"]},
-    "prediction_path": {"type": ["string", "null"]},
-    "parameter_count": {"type": ["integer", "null"], "minimum": 0},
-    "training_seconds": {"type": ["number", "null"], "minimum": 0},
-    "total_wall_seconds": {"type": ["number", "null"], "minimum": 0},
-    "inference_latency_ms_per_sample": {"type": "object"},
-    "peak_gpu_memory_bytes": {"type": ["integer", "null"], "minimum": 0},
-    "device": {"type": "string"},
-    "environment": {"type": "object"},
-    "labels_regenerated": {"type": "boolean"},
-    "test_set_used_for_selection": {"type": "boolean"},
-    "tiny_batch_overfit": {"type": "object"},
-    "checkpoint_round_trip": {"type": "object"},
-    "error": {"type": ["string", "null"]},
-    "command": {"type": ["string", "null"]},
-    "notes": {"type": ["string", "null"]}
+    "protocol_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "protocol_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "code_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "git_tree_dirty": {
+      "type": "boolean"
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "setup": {
+      "enum": [
+        "anchored_forward",
+        "first_seven_final_three"
+      ]
+    },
+    "fold": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "day_group": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "horizon": {
+      "enum": [
+        10,
+        20,
+        30,
+        50,
+        100
+      ]
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "planned",
+        "running",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "exit_code": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "termination_reason": {
+      "enum": [
+        "not_applicable",
+        "early_stopping",
+        "max_epochs",
+        "completed",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "configured_max_epochs": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "actual_epochs_completed": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "best_epoch": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "resumed": {
+      "type": "boolean"
+    },
+    "resumed_from_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "started_utc": {
+      "type": "string"
+    },
+    "completed_utc": {
+      "type": "string"
+    },
+    "data_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "configuration_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "configuration_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "archive_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "training_file_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "testing_file_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "prediction_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "checkpoint_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "checkpoint_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prediction_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sample_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "class_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "parameter_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "training_seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "total_wall_seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "inference_latency_ms_per_sample": {
+      "type": "object"
+    },
+    "peak_gpu_memory_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "device": {
+      "type": "string"
+    },
+    "environment": {
+      "type": "object"
+    },
+    "labels_regenerated": {
+      "type": "boolean"
+    },
+    "test_set_used_for_selection": {
+      "type": "boolean"
+    },
+    "tiny_batch_overfit": {
+      "type": "object"
+    },
+    "checkpoint_round_trip": {
+      "type": "object"
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "command": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "if": {
+    "properties": {
+      "model": {
+        "enum": [
+          "mlplob",
+          "deeplob"
+        ]
+      }
+    },
+    "required": [
+      "model"
+    ]
+  },
+  "then": {
+    "required": [
+      "configured_max_epochs",
+      "actual_epochs_completed",
+      "best_epoch",
+      "checkpoint_sha256",
+      "checkpoint_path"
+    ]
   }
 }

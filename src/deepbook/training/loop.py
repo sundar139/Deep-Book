@@ -88,8 +88,14 @@ def fit_torch_classifier(
     checkpoint_path: Path | None = None,
     configuration_hash: str = "",
     data_fingerprint: str = "",
+    protocol_hash: str = "",
+    resume_from: Path | None = None,
 ) -> TorchFitResult:
-    """Fit using training-only data and select the checkpoint by validation macro-F1."""
+    """Fit using training-only data and select checkpoint by validation macro-F1.
+
+    When resume_from is set, restore full state from the checkpoint and
+    continue training from the next epoch.
+    """
     if len(train_dataset) == 0 or len(validation_dataset) == 0:  # type: ignore[arg-type]
         raise ValueError("training and validation datasets must both be non-empty")
     if max_epochs <= 0 or patience <= 0 or batch_size <= 0 or learning_rate <= 0.0:
@@ -100,7 +106,33 @@ def fit_torch_classifier(
         raise RuntimeError("CUDA was requested but is unavailable")
     model.to(target_device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    generator = torch.Generator().manual_seed(seed)
+    start_epoch = 1
+    stale_epochs = 0
+    best_score = float("-inf")
+    best_epoch = 0
+    best_state: dict[str, torch.Tensor] | None = None
+
+    if resume_from is not None and resume_from.is_file():
+        metadata = load_checkpoint(resume_from, model, optimizer)
+        if metadata.get("configuration_hash", "") != configuration_hash:
+            raise ValueError("resume rejected: configuration hash mismatch")
+        if metadata.get("data_fingerprint", "") != data_fingerprint:
+            raise ValueError("resume rejected: data fingerprint mismatch")
+        if metadata.get("protocol_hash", "") != protocol_hash:
+            raise ValueError("resume rejected: protocol hash mismatch")
+        start_epoch = int(metadata["epoch"]) + 1
+        best_epoch = int(metadata.get("best_epoch", metadata["epoch"]))
+        best_score = float(metadata.get("best_validation_metric", float("-inf")))
+        stale_epochs = int(metadata.get("patience_counter", 0))
+        # Restore best state from the checkpoint model
+        best_state = {
+            key: value.detach().cpu().clone() for key, value in model.state_dict().items()
+        }
+        if start_epoch > max_epochs:
+            # Already completed; return current state
+            pass
+
+    generator = torch.Generator().manual_seed(seed + start_epoch - 1)
     loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -111,12 +143,8 @@ def fit_torch_classifier(
     if target_device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(target_device)
     started = time.perf_counter()
-    best_score = float("-inf")
-    best_epoch = 0
-    stale_epochs = 0
-    best_state: dict[str, torch.Tensor] | None = None
 
-    for epoch in range(1, max_epochs + 1):
+    for epoch in range(start_epoch, max_epochs + 1):
         model.train()
         for features, labels in loader:
             optimizer.zero_grad(set_to_none=True)
@@ -151,6 +179,9 @@ def fit_torch_classifier(
                     configuration_hash=configuration_hash,
                     data_fingerprint=data_fingerprint,
                     best_validation_metric=score,
+                    best_epoch=best_epoch,
+                    patience_counter=stale_epochs,
+                    protocol_hash=protocol_hash,
                 )
         else:
             stale_epochs += 1
