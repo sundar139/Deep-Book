@@ -2,7 +2,7 @@
 
 **Status:** Frozen after engineering smoke tests and before any full confirmatory matrix
 **Frozen at:** 2026-07-31T12:51:49Z
-**Framework-freeze commit:** pending (no baseline framework commit exists as of this freeze)
+**Framework-freeze commit:** Resolved at runtime as the latest Git commit touching the frozen protocol, reference, and experiment-configuration files. Every new run manifest records that resolved `protocol_commit` together with `protocol_sha256`, a canonical digest over the complete frozen contract file set. A run is confirmatory only when its code commit descends from the recorded `protocol_commit` and the recorded digest still matches the working contract.
 **Repeatability scope:** The architecture, hyperparameters, seeds, data contract, evaluation protocol, and acceptance bands recorded below are frozen and apply to all future confirmatory runs. This protocol was frozen after engineering smoke tests validated that models compile, datasets load, gradients flow, and checkpoints round-trip. No smoke-test metrics, parameter choices, or observed behavior influenced these frozen values.
 
 **All prior one-epoch or partial runs are nonconfirmatory.** Their metrics are excluded from official aggregation. Smoke metrics must not influence architecture, seeds, acceptance thresholds, or full-run hyperparameters. The complete result matrix has not yet been evaluated. Test results may not be used for model selection.
@@ -49,12 +49,13 @@ The nine test days are reported separately. Fold means are unweighted across fol
 
 ### First seven / final three days
 
-- fit data: days 1--6;
-- validation data: day 7;
-- final training fit after checkpoint selection: days 1--7;
-- test data: days 8, 9, and 10 separately and combined without duplicate observations.
+Recorded as `setup: first_seven_final_three`, `fold: null`, `day_group: days_8_9_10`.
 
-The three test days remain separate source boundaries during window generation.
+- fit data: the single audited cumulative days 1--7 training matrix, used exactly once;
+- validation data: the chronological training-only tail of that matrix, with the same purge and embargo;
+- test data: the three distinct audited daily files for days 8, 9, and 10, reported separately and combined without duplicate observations.
+
+The three test days remain separate source boundaries during window generation. Each day is windowed independently, so no window spans two days and no test observation is produced twice. Only completed per-day prediction arrays are concatenated, after each day has been windowed on its own. Every persisted sample keeps an integer `source_file_id` (the audited source fold of its file) and an integer `day_boundary_id` (8, 9, or 10); the manifest carries a `day_index_map` binding each day identifier to its audited source file digest and observation count.
 
 ### Validation and embargo
 
@@ -103,7 +104,7 @@ The official notebook has no dropout and initializes zero hidden/cell states. Th
 ## Classical and MLP-LOB contracts
 
 - Majority: training-label frequencies with additive smoothing `1e-6`; hard prediction is the training argmax.
-- Causal movement persistence: for horizon `h`, the prior supplied label at lag `h` is used only when its future-information interval has ended. If the source boundary cannot establish this relation, the baseline is omitted rather than guessed.
+- Causal movement persistence: for horizon `h`, the prior supplied label at lag `h` is used only when its future-information interval has ended, and only within one independent source segment. The lag never reaches across a file, day, or role boundary, so the first `h` observations of every test day yield no prediction and are excluded from metrics rather than guessed.
 - Logistic: multinomial `LogisticRegression` on the current event's 144 supplied non-label features, `lbfgs`, `C=1.0`, `max_iter=200`, fixed `random_state=1337`; the raw-LOB 40-feature form is available as a declared alternative.
 - Tree: `RandomForestClassifier`, 200 trees, `max_depth=18`, `min_samples_leaf=2`, `max_features=sqrt`, training-only deterministic chronological cap of 100,000 rows when needed, `random_state` from the declared seed list.
 - MLP-LOB: flattened `[100,40]` LOB input, hidden widths 128 and 64, ReLU activations, dropout 0.0, three logits, Adam and the same training/checkpoint contract. It is a fixed local comparator and is not named as another architecture.
@@ -118,7 +119,13 @@ For an exactly matched paper metric, the initial acceptance band is five absolut
 
 **Engineering smoke runs.** Runs classified as `smoke` (one epoch, dirty tree, mismatched config, pre-freeze code state, or explicitly marked smoke) are excluded from confirmatory reports. Their metrics are logged for engineering reference only and must never be mixed with confirmatory aggregate statistics. The report must clearly separate smoke outputs with per-run exclusion reasons.
 
-**Run eligibility.** A run is confirmatory when: (a) the framework-freeze commit is present in the run's git ancestry, (b) the configuration and data fingerprints match the frozen contract, (c) `max_epochs` equals the configured value, (d) the tree was clean, and (e) `eligible_for_confirmatory_report` is explicitly true. All other runs are excluded.
+**Run eligibility.** Eligibility is classified only after every artifact exists, and a run is confirmatory when all of the following hold: (a) the resolved protocol commit is an ancestor of the run's code commit; (b) the frozen contract digest is unchanged across the run; (c) the configuration hash still matches its configuration file; (d) the recorded data fingerprint equals the frozen FI-2010 data identity for that setup cell, and the archive digest equals the authoritative archive digest; (e) the tree was clean; (f) the status is `completed`; (g) a prediction artifact exists, loads, and has the recorded sample count; (h) for neural runs a best-model checkpoint exists with a matching digest, the termination reason is `early_stopping` or `max_epochs`, and `1 <= actual_epochs_completed <= configured_max_epochs` with `1 <= best_epoch <= actual_epochs_completed`; (i) for classical runs the epoch fields are null and the termination reason is `not_applicable`; and (j) no exclusion reason was recorded. Early stopping is a valid confirmatory outcome. Two manifests claiming the same logical identity (model, setup, fold or day group, horizon, seed, configuration hash, data fingerprint, run kind) are both excluded from aggregation.
+
+**Frozen data identity.** `configs/references/fi2010_frozen_data_identity.yaml` records the authoritative archive digest and the audited per-file digests and observation counts for every fold and for the days 8--10 group. Data identity is never compared only against itself: each run's recorded fingerprint is recomputed from that frozen file and must match.
+
+**Checkpoints.** Two checkpoints are kept per neural run and both are ignored by version control. `<run-id>.best.pt` holds the validation-selected weights and is the only checkpoint used for final evaluation and test prediction. `<run-id>.last.pt` is rewritten atomically at the end of every completed epoch and is the only checkpoint an interrupted run may resume from; resuming from the best checkpoint is rejected because it holds stale weights. Shuffle order for epoch `e` is a pure function of the base seed and `e`, so a resumed epoch replays exactly the order the uninterrupted run would have used.
+
+**Reference comparison.** A published reference value is compared only when the matching model, setup, and horizon cell has complete coverage: all nine folds for the anchored setup, or the complete days 8--10 group for the first-seven/final-three setup, at every required seed. Incomplete cells are reported as `INCOMPLETE — no reference conclusion`. A single fold is never compared with a nine-fold published mean.
 
 Test labels and predictions are never used for fitting, normalization, class weighting, learning-rate choice, architecture choice, epoch choice, threshold choice, seed choice, calibration, or checkpoint selection. No horizon-unbiased or cost-aware labels are introduced. No execution simulation or reinforcement learning is part of this contract.
 

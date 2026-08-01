@@ -1,0 +1,91 @@
+schema_version: 1
+description: >-
+  Frozen FI-2010 data identity. Every value below was produced by the audited
+  acquisition and split pipeline and is compared against each run's recorded
+  data fingerprint before a run may be declared confirmatory. Changing any
+  value here, or any underlying file, invalidates confirmatory eligibility.
+archive_sha256: cea93692a270724fa91e8f124da641db727d757e5e0f0bb85067709e9932f664
+benchmark_variant: no_auction
+normalization: zscore
+parser_version: "1.1"
+sequence_length: 100
+
+# Anchored forward folds. Day 1 is training CF_1; days 2-10 are testing CF_1-CF_9.
+folds:
+  1:
+    training_file_sha256: c7f50efeefc75cc27a192b4c1b87b3d77fbe0e58d0a53bea9767f0e5724b5840
+    training_observations: 39512
+    testing_file_sha256: 41ae0161228fe793495df9b99e262c4b2f38ca0cc2376e823d84bcd4f5a3b4e0
+    testing_observations: 38397
+    testing_day_index: 2
+  2:
+    training_file_sha256: a00007ead37685a33349d3914ed3f652bc5ccc6706aa46677795643825445805
+    training_observations: 77909
+    testing_file_sha256: 7be6a9df165d79fec8c6b03ebb4772a18e0f2eb31b549b0d95aeb1ebadbb5f00
+    testing_observations: 28535
+    testing_day_index: 3
+  3:
+    training_file_sha256: 29b3fdfb0d61c153b3939754cf6e72a71476f946c3c96276a436a186b67c86e2
+    training_observations: 106444
+    testing_file_sha256: e888acc7802f744d96b3bd1883d685d5cc3fd96d4a91cc27c27a7d1d2486ebb4
+    testing_observations: 37023
+    testing_day_index: 4
+  4:
+    training_file_sha256: 41595071708ebdbd4c735b651a87c893f16cbd1dec10d9a76bc38cdf1ce75dcc
+    training_observations: 143467
+    testing_file_sha256: 918ddb2ab6f9f4d82bd44c93d3e0c809e9e0e64f2b4199aa27b8ed185a332a04
+    testing_observations: 34785
+    testing_day_index: 5
+  5:
+    training_file_sha256: 15ff48d22fb34d3b03d0c2a13f2d1ca9ceb7b433a1488b58ca19f422027c5b04
+    training_observations: 178252
+    testing_file_sha256: 12e0a3de8b832c1d0b84b7ae473f77ad0e95fc31d40dadcfc9aeca838b877de4
+    testing_observations: 39152
+    testing_day_index: 6
+  6:
+    training_file_sha256: e8fe967cf6d345cccc635cc5e0e1b952b1f07f19daac96ccf1745e1a9e4909cb
+    training_observations: 217404
+    testing_file_sha256: 906dbe61f956b25118d7dfde758b12968c30434a533f5bf78000cddb0ab18ff4
+    testing_observations: 37346
+    testing_day_index: 7
+  7:
+    training_file_sha256: 0d2839ff7575f0910a03fd782edc6b3a561d544b07cf2329ebe7f33c8affe6c6
+    training_observations: 254750
+    testing_file_sha256: 96ee1a73a581edfa46ffcbdbd41104746664cb4fc112ac841344f5c78ebab492
+    testing_observations: 55478
+    testing_day_index: 8
+  8:
+    training_file_sha256: 9cae181dd10c5df05130952006c0a9c0394889c4a17a18d16b57dd873b42d844
+    training_observations: 310228
+    testing_file_sha256: 7a4b787876a667aeaf50dae37f144eff3b42c9307f2f5af8d7cdbfd630c4c8a0
+    testing_observations: 52172
+    testing_day_index: 9
+  9:
+    training_file_sha256: 58e522b60e76167b88c9ce946eac2e81b3ea32baa60a013f664c77761ad09ca4
+    training_observations: 362400
+    testing_file_sha256: b90a4aa63010662c89003134f0dbaa08c7ee14d36433073eb335d5478fb0a4e9
+    testing_observations: 31937
+    testing_day_index: 10
+
+# First seven / final three days. Fit on the cumulative days 1-7 training file;
+# test on the three distinct daily files for days 8, 9, and 10, each windowed
+# independently so no window crosses a day boundary.
+day_groups:
+  days_8_9_10:
+    training_fold: 7
+    training_file_sha256: 0d2839ff7575f0910a03fd782edc6b3a561d544b07cf2329ebe7f33c8affe6c6
+    training_observations: 254750
+    training_days: [1, 2, 3, 4, 5, 6, 7]
+    test_days:
+      - day_index: 8
+        source_fold: 7
+        file_sha256: 96ee1a73a581edfa46ffcbdbd41104746664cb4fc112ac841344f5c78ebab492
+        observations: 55478
+      - day_index: 9
+        source_fold: 8
+        file_sha256: 7a4b787876a667aeaf50dae37f144eff3b42c9307f2f5af8d7cdbfd630c4c8a0
+        observations: 52172
+      - day_index: 10
+        source_fold: 9
+        file_sha256: b90a4aa63010662c89003134f0dbaa08c7ee14d36433073eb335d5478fb0a4e9
+        observations: 31937

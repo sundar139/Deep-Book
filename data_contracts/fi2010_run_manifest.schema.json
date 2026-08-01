@@ -220,6 +220,32 @@
         "null"
       ]
     },
+    "best_checkpoint_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "best_checkpoint_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_checkpoint_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "last_checkpoint_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "prediction_path": {
       "type": [
         "string",
@@ -237,6 +263,41 @@
       "type": "array",
       "items": {
         "type": "string"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "testing_file_sha256_by_day": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "day_index_map": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "source_fold",
+          "file_sha256"
+        ],
+        "properties": {
+          "source_fold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "file_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "observations": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
       }
     },
     "parameter_count": {
@@ -307,26 +368,128 @@
       ]
     }
   },
-  "if": {
-    "properties": {
-      "model": {
-        "enum": [
-          "mlplob",
-          "deeplob"
-        ]
+  "allOf": [
+    {
+      "$comment": "Setup 1 identifies a cell by fold; Setup 2 by day group.",
+      "if": {
+        "properties": {"setup": {"const": "anchored_forward"}},
+        "required": ["setup"]
+      },
+      "then": {
+        "required": ["fold"],
+        "properties": {
+          "fold": {"type": "integer", "minimum": 1, "maximum": 9},
+          "day_group": {"type": "null"}
+        }
       }
     },
-    "required": [
-      "model"
-    ]
-  },
-  "then": {
-    "required": [
-      "configured_max_epochs",
-      "actual_epochs_completed",
-      "best_epoch",
-      "checkpoint_sha256",
-      "checkpoint_path"
-    ]
-  }
+    {
+      "if": {
+        "properties": {"setup": {"const": "first_seven_final_three"}},
+        "required": ["setup"]
+      },
+      "then": {
+        "required": ["day_group"],
+        "properties": {
+          "fold": {"type": "null"},
+          "day_group": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    {
+      "$comment": "Every completed run must persist a verifiable prediction artifact.",
+      "if": {
+        "properties": {"status": {"const": "completed"}},
+        "required": ["status"]
+      },
+      "then": {
+        "required": [
+          "prediction_path",
+          "prediction_sha256",
+          "sample_count",
+          "class_order",
+          "day_index_map",
+          "testing_file_sha256_by_day"
+        ],
+        "properties": {
+          "prediction_path": {"type": "string", "minLength": 1},
+          "prediction_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "sample_count": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "$comment": "Completed neural runs need best-checkpoint and epoch provenance.",
+      "if": {
+        "properties": {
+          "model": {"enum": ["mlplob", "deeplob"]},
+          "status": {"const": "completed"}
+        },
+        "required": ["model", "status"]
+      },
+      "then": {
+        "required": [
+          "configured_max_epochs",
+          "actual_epochs_completed",
+          "best_epoch",
+          "termination_reason",
+          "best_checkpoint_path",
+          "best_checkpoint_sha256",
+          "last_checkpoint_path"
+        ],
+        "properties": {
+          "configured_max_epochs": {"type": "integer", "minimum": 1},
+          "actual_epochs_completed": {"type": "integer", "minimum": 1},
+          "best_epoch": {"type": "integer", "minimum": 1},
+          "termination_reason": {"enum": ["early_stopping", "max_epochs"]},
+          "best_checkpoint_path": {"type": "string", "minLength": 1},
+          "best_checkpoint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    {
+      "$comment": "Completed classical runs have no epochs and no checkpoints.",
+      "if": {
+        "properties": {
+          "model": {
+            "enum": [
+              "majority",
+              "causal_persistence",
+              "logistic_current_event",
+              "random_forest"
+            ]
+          },
+          "status": {"const": "completed"}
+        },
+        "required": ["model", "status"]
+      },
+      "then": {
+        "properties": {
+          "configured_max_epochs": {"type": "null"},
+          "actual_epochs_completed": {"type": "null"},
+          "best_epoch": {"type": "null"},
+          "termination_reason": {"const": "not_applicable"},
+          "best_checkpoint_path": {"type": "null"},
+          "best_checkpoint_sha256": {"type": "null"},
+          "last_checkpoint_path": {"type": "null"},
+          "last_checkpoint_sha256": {"type": "null"}
+        }
+      }
+    },
+    {
+      "$comment": "An eligible confirmatory run carries no exclusion reason and a clean tree.",
+      "if": {
+        "properties": {"eligible_for_confirmatory_report": {"const": true}},
+        "required": ["eligible_for_confirmatory_report"]
+      },
+      "then": {
+        "properties": {
+          "exclusion_reasons": {"type": "array", "maxItems": 0},
+          "git_tree_dirty": {"const": false},
+          "run_kind": {"const": "confirmatory"},
+          "status": {"const": "completed"}
+        }
+      }
+    }
+  ]
 }

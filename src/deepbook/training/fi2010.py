@@ -14,27 +14,42 @@ from typing import Any
 
 import numpy as np
 import torch
+import yaml
 from torch.utils.data import Dataset
 
 # ponytail: frozen contract files — paths relative to repo root
 _PROTOCOL_CONTRACT_PATHS = (
     "reports/protocol/fi2010_baseline_reproduction.md",
     "configs/references/deeplob_fi2010.yaml",
+    "configs/references/fi2010_frozen_data_identity.yaml",
     "configs/experiments/fi2010/classical.yaml",
     "configs/experiments/fi2010/mlplob.yaml",
     "configs/experiments/fi2010/deeplob.yaml",
 )
 
+FROZEN_DATA_IDENTITY_PATH = "configs/references/fi2010_frozen_data_identity.yaml"
+DAY_GROUP_FIRST_SEVEN_FINAL_THREE = "days_8_9_10"
+SETUP_ANCHORED_FORWARD = "anchored_forward"
+SETUP_FIRST_SEVEN_FINAL_THREE = "first_seven_final_three"
+
 
 def resolve_protocol_commit(root: Path) -> str:
-    """Return the latest Git commit touching any frozen protocol/config/reference file."""
-    result = subprocess.run(
-        ["git", "log", "-1", "--format=%H", "--", *_PROTOCOL_CONTRACT_PATHS],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    """Return the latest Git commit touching any frozen protocol/config/reference file.
+
+    Returns an empty string when ``root`` is not a Git work tree or Git is
+    unavailable. An empty commit can never satisfy :func:`check_protocol_ancestry`,
+    so a run without resolvable provenance is excluded rather than crashing.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%H", "--", *_PROTOCOL_CONTRACT_PATHS],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, OSError):
+        return ""
     return result.stdout.strip()
 
 
@@ -78,6 +93,94 @@ def report_fingerprint(report: Any) -> str:
         if key not in {"generated_utc", "report_fingerprint", "generated_from_manifests_utc"}
     }
     return configuration_hash(stable_report)
+
+
+def frozen_data_identity(root: Path) -> dict[str, Any]:
+    """Load the tracked frozen FI-2010 data identity contract."""
+    path = root / FROZEN_DATA_IDENTITY_PATH
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"frozen data identity must be a mapping: {path}")
+    return value
+
+
+def anchored_fold_fingerprint(archive_sha256: str, fold: int, training: str, testing: str) -> str:
+    """Return the canonical Setup 1 data fingerprint for one anchored fold."""
+    return configuration_hash(
+        {
+            "archive_sha256": archive_sha256,
+            "fold": int(fold),
+            "training_file_sha256": training,
+            "testing_file_sha256": testing,
+        }
+    )
+
+
+def day_group_fingerprint(
+    archive_sha256: str, day_group: str, training: str, testing_by_day: dict[str, str]
+) -> str:
+    """Return the canonical Setup 2 data fingerprint for one day group."""
+    return configuration_hash(
+        {
+            "archive_sha256": archive_sha256,
+            "day_group": day_group,
+            "training_file_sha256": training,
+            "testing_file_sha256_by_day": dict(sorted(testing_by_day.items())),
+        }
+    )
+
+
+def combined_testing_sha256(testing_by_day: dict[str, str]) -> str:
+    """Return one canonical digest over several ordered per-day testing file digests."""
+    payload = "\n".join(f"{day}:{testing_by_day[day]}" for day in sorted(testing_by_day, key=int))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def expected_data_fingerprint(
+    root: Path, *, setup: str, fold: int | None = None, day_group: str | None = None
+) -> str:
+    """Return the frozen expected data fingerprint for one setup cell."""
+    frozen = frozen_data_identity(root)
+    archive = str(frozen["archive_sha256"])
+    if setup == SETUP_ANCHORED_FORWARD:
+        if fold is None:
+            raise ValueError("anchored_forward requires a fold")
+        entry = frozen["folds"][int(fold)]
+        return anchored_fold_fingerprint(
+            archive,
+            int(fold),
+            str(entry["training_file_sha256"]),
+            str(entry["testing_file_sha256"]),
+        )
+    if setup == SETUP_FIRST_SEVEN_FINAL_THREE:
+        if day_group is None:
+            raise ValueError("first_seven_final_three requires a day_group")
+        entry = frozen["day_groups"][str(day_group)]
+        testing_by_day = {
+            str(day["day_index"]): str(day["file_sha256"]) for day in entry["test_days"]
+        }
+        return day_group_fingerprint(
+            archive, str(day_group), str(entry["training_file_sha256"]), testing_by_day
+        )
+    raise ValueError(f"unknown setup: {setup}")
+
+
+def expected_archive_sha256(root: Path) -> str:
+    """Return the frozen authoritative FI-2010 archive digest."""
+    return str(frozen_data_identity(root)["archive_sha256"])
+
+
+def epoch_shuffle_seed(base_seed: int, epoch: int) -> int:
+    """Return the shuffle seed for one epoch as a pure function of base seed and epoch.
+
+    Uninterrupted epoch ``e`` and resumed epoch ``e`` must receive the identical
+    sample order, so this must never depend on prior generator consumption or on
+    whether training was resumed.
+    """
+    if epoch < 1:
+        raise ValueError("epoch must be positive")
+    digest = hashlib.sha256(f"{int(base_seed)}:{int(epoch)}".encode("ascii")).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFF_FFFF_FFFF_FFFF
 
 
 def chronological_training_validation_split(
@@ -343,6 +446,24 @@ def seed_everything(seed: int) -> dict[str, Any]:
     }
 
 
+def _write_torch_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    torch.save(payload, temporary)
+    temporary.replace(path)
+
+
+def _rng_states() -> dict[str, Any]:
+    states: dict[str, Any] = {
+        "python_rng": random.getstate(),
+        "numpy_rng": np.random.get_state(),
+        "torch_rng": torch.random.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        states["cuda_rng"] = torch.cuda.get_rng_state_all()
+    return states
+
+
 def save_checkpoint_atomic(
     path: Path,
     model: torch.nn.Module,
@@ -356,10 +477,14 @@ def save_checkpoint_atomic(
     patience_counter: int = 0,
     protocol_hash: str = "",
 ) -> None:
-    """Atomically save a complete resumable training state."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    payload = {
+    """Atomically save the validation-selected best-model checkpoint.
+
+    This checkpoint is for final evaluation and test prediction only. Resuming an
+    interrupted run must use the last-state checkpoint written by
+    :func:`save_training_state_atomic`, never this one.
+    """
+    payload: dict[str, Any] = {
+        "checkpoint_kind": "best",
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "epoch": epoch,
@@ -370,14 +495,58 @@ def save_checkpoint_atomic(
         "best_epoch": best_epoch or epoch,
         "patience_counter": patience_counter,
         "protocol_hash": protocol_hash,
-        "python_rng": random.getstate(),
-        "numpy_rng": np.random.get_state(),
-        "torch_rng": torch.random.get_rng_state(),
+        **_rng_states(),
     }
-    if torch.cuda.is_available():
-        payload["cuda_rng"] = torch.cuda.get_rng_state_all()
-    torch.save(payload, temporary)
-    temporary.replace(path)
+    _write_torch_atomic(path, payload)
+
+
+def save_training_state_atomic(
+    path: Path,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    *,
+    completed_epoch: int,
+    seed: int,
+    configuration_hash: str,
+    data_fingerprint: str,
+    protocol_hash: str,
+    best_model_state: dict[str, torch.Tensor] | None,
+    best_epoch: int,
+    best_validation_metric: float,
+    patience_counter: int,
+    best_checkpoint_path: str | None = None,
+    scaler_state: dict[str, Any] | None = None,
+    scheduler_state: dict[str, Any] | None = None,
+) -> None:
+    """Atomically save the exact end-of-epoch state needed to resume training.
+
+    Written after every completed epoch. ``next_epoch`` is the epoch a resumed run
+    must start from; the shuffle order for that epoch is derived from
+    ``seed`` and the epoch index by :func:`epoch_shuffle_seed`, so no generator
+    consumption history has to be replayed.
+    """
+    payload: dict[str, Any] = {
+        "checkpoint_kind": "last",
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "epoch": completed_epoch,
+        "completed_epoch": completed_epoch,
+        "next_epoch": completed_epoch + 1,
+        "seed": seed,
+        "shuffle_seed_base": seed,
+        "configuration_hash": configuration_hash,
+        "data_fingerprint": data_fingerprint,
+        "protocol_hash": protocol_hash,
+        "best_model_state": best_model_state,
+        "best_epoch": best_epoch,
+        "best_checkpoint_path": best_checkpoint_path,
+        "best_validation_metric": best_validation_metric,
+        "patience_counter": patience_counter,
+        "scaler_state": scaler_state,
+        "scheduler_state": scheduler_state,
+        **_rng_states(),
+    }
+    _write_torch_atomic(path, payload)
 
 
 def load_checkpoint(
@@ -398,3 +567,17 @@ def load_checkpoint(
     if "cuda_rng" in payload and torch.cuda.is_available():
         torch.cuda.set_rng_state_all(payload["cuda_rng"])
     return {key: payload[key] for key in payload if key not in {"model", "optimizer"}}
+
+
+def load_training_state(
+    path: Path, model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> dict[str, Any]:
+    """Restore a last-state resume checkpoint and return its metadata."""
+    metadata = load_checkpoint(path, model, optimizer)
+    kind = metadata.get("checkpoint_kind")
+    if kind != "last":
+        raise ValueError(
+            f"resume requires a last-state checkpoint, got checkpoint_kind={kind!r}; "
+            "the best-model checkpoint holds stale weights and must not be resumed from"
+        )
+    return metadata

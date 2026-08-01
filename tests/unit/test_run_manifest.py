@@ -18,6 +18,17 @@ from deepbook.training.fi2010 import (
     validate_run_manifest,
 )
 
+_PLACEHOLDER_COMMIT = "0" * 40
+
+
+def _protocol_commit(root: Path) -> str:
+    """Resolve the protocol commit, falling back outside a Git work tree.
+
+    The schema assertions below are about manifest shape, not Git provenance, so
+    they must still run from a plain source export.
+    """
+    return resolve_protocol_commit(root) or _PLACEHOLDER_COMMIT
+
 
 def _minimal_valid_manifest(root: Path) -> dict:
     """Return a minimal valid manifest using real file-system values where needed."""
@@ -38,7 +49,7 @@ def _minimal_valid_manifest(root: Path) -> dict:
         run_kind="smoke",
         eligible_for_confirmatory_report=False,
         exclusion_reasons=["test"],
-        protocol_commit=resolve_protocol_commit(root),
+        protocol_commit=_protocol_commit(root),
         protocol_sha256=protocol_sha256(root),
         configured_max_epochs=None,
         actual_epochs_completed=None,
@@ -57,6 +68,13 @@ def _minimal_valid_manifest(root: Path) -> dict:
         environment={"python": "3.11"},
         labels_regenerated=False,
         test_set_used_for_selection=False,
+        # A completed run must persist a verifiable prediction artifact.
+        prediction_path="artifacts/fi2010/baselines/predictions/unit-test.npz",
+        prediction_sha256="f" * 64,
+        sample_count=128,
+        class_order=["up", "stationary", "down"],
+        testing_file_sha256_by_day={"2": "e" * 64},
+        day_index_map={"2": {"source_fold": 1, "file_sha256": "e" * 64, "observations": 38397}},
     )
 
 
@@ -118,5 +136,89 @@ def test_protocol_sha256_is_deterministic() -> None:
 def test_resolve_protocol_commit_returns_valid_sha() -> None:
     root = Path(__file__).resolve().parents[2]
     commit = resolve_protocol_commit(root)
+    if not commit:
+        pytest.skip("protocol commit resolution requires a Git work tree")
     assert len(commit) == 40
     assert all(c in "0123456789abcdef" for c in commit)
+
+
+def test_resolve_protocol_commit_is_empty_outside_a_git_work_tree(tmp_path: Path) -> None:
+    """A non-repository must yield no provenance rather than crash."""
+    assert resolve_protocol_commit(tmp_path) == ""
+
+
+def test_completed_run_without_a_prediction_artifact_fails_validation() -> None:
+    root = Path(__file__).resolve().parents[2]
+    schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
+    for missing in ("prediction_path", "prediction_sha256", "sample_count", "class_order"):
+        manifest = _minimal_valid_manifest(root)
+        del manifest[missing]
+        with pytest.raises(Exception, match="."):
+            validate_run_manifest(manifest, schema_path)
+
+
+def test_eligible_run_must_have_no_exclusion_reasons_and_a_clean_tree() -> None:
+    root = Path(__file__).resolve().parents[2]
+    schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
+    eligible = _minimal_valid_manifest(root)
+    eligible.update(
+        eligible_for_confirmatory_report=True, run_kind="confirmatory", exclusion_reasons=[]
+    )
+    validate_run_manifest(eligible, schema_path)
+
+    with pytest.raises(Exception, match="."):
+        validate_run_manifest({**eligible, "exclusion_reasons": ["late reason"]}, schema_path)
+    with pytest.raises(Exception, match="."):
+        validate_run_manifest({**eligible, "git_tree_dirty": True}, schema_path)
+    with pytest.raises(Exception, match="."):
+        validate_run_manifest({**eligible, "run_kind": "smoke"}, schema_path)
+
+
+def test_completed_classical_run_may_not_claim_epochs_or_checkpoints() -> None:
+    root = Path(__file__).resolve().parents[2]
+    schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
+    manifest = _minimal_valid_manifest(root)
+    for field, value in (
+        ("configured_max_epochs", 50),
+        ("actual_epochs_completed", 3),
+        ("best_epoch", 2),
+        ("termination_reason", "early_stopping"),
+        ("best_checkpoint_path", "artifacts/run.best.pt"),
+    ):
+        with pytest.raises(Exception, match="."):
+            validate_run_manifest({**manifest, field: value}, schema_path)
+
+
+def test_completed_neural_run_requires_epoch_and_best_checkpoint_provenance() -> None:
+    root = Path(__file__).resolve().parents[2]
+    schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
+    neural = _minimal_valid_manifest(root)
+    neural.update(
+        model="deeplob",
+        configured_max_epochs=50,
+        actual_epochs_completed=17,
+        best_epoch=12,
+        termination_reason="early_stopping",
+        best_checkpoint_path="artifacts/run.best.pt",
+        best_checkpoint_sha256="a" * 64,
+        last_checkpoint_path="artifacts/run.last.pt",
+    )
+    validate_run_manifest(neural, schema_path)
+
+    for field in (
+        "configured_max_epochs",
+        "actual_epochs_completed",
+        "best_epoch",
+        "best_checkpoint_path",
+        "best_checkpoint_sha256",
+        "last_checkpoint_path",
+    ):
+        broken = dict(neural)
+        del broken[field]
+        with pytest.raises(Exception, match="."):
+            validate_run_manifest(broken, schema_path)
+
+    with pytest.raises(Exception, match="."):
+        validate_run_manifest({**neural, "actual_epochs_completed": 0}, schema_path)
+    with pytest.raises(Exception, match="."):
+        validate_run_manifest({**neural, "termination_reason": "not_applicable"}, schema_path)

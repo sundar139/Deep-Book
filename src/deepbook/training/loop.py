@@ -13,7 +13,14 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from deepbook.evaluation.classification import classification_metrics
-from deepbook.training.fi2010 import load_checkpoint, save_checkpoint_atomic, seed_everything
+from deepbook.training.fi2010 import (
+    epoch_shuffle_seed,
+    load_checkpoint,
+    load_training_state,
+    save_checkpoint_atomic,
+    save_training_state_atomic,
+    seed_everything,
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +33,11 @@ class TorchFitResult:
     inference_latency_ms_per_sample: float
     peak_gpu_memory_bytes: int
     checkpoint_round_trip: bool
+    actual_epochs_completed: int = 0
+    termination_reason: str = "max_epochs"
+    patience_counter: int = 0
+    best_validation_metric: float = 0.0
+    final_training_loss: float = 0.0
 
 
 def predict_raw(
@@ -85,16 +97,23 @@ def fit_torch_classifier(
     batch_size: int,
     learning_rate: float,
     device: str,
-    checkpoint_path: Path | None = None,
+    best_checkpoint_path: Path | None = None,
+    last_checkpoint_path: Path | None = None,
     configuration_hash: str = "",
     data_fingerprint: str = "",
     protocol_hash: str = "",
     resume_from: Path | None = None,
 ) -> TorchFitResult:
-    """Fit using training-only data and select checkpoint by validation macro-F1.
+    """Fit using training-only data and select the best model by validation macro-F1.
 
-    When resume_from is set, restore full state from the checkpoint and
-    continue training from the next epoch.
+    Two checkpoints serve two purposes. ``best_checkpoint_path`` holds the
+    validation-selected weights used for final evaluation and test prediction.
+    ``last_checkpoint_path`` holds the exact end-of-epoch state and is the only
+    checkpoint a resumed run may start from; ``resume_from`` must point at one.
+
+    Shuffle order for epoch ``e`` comes from :func:`epoch_shuffle_seed`, a pure
+    function of the base seed and ``e``, so a resumed epoch sees exactly the
+    order the uninterrupted run would have seen.
     """
     if len(train_dataset) == 0 or len(validation_dataset) == 0:  # type: ignore[arg-type]
         raise ValueError("training and validation datasets must both be non-empty")
@@ -112,39 +131,44 @@ def fit_torch_classifier(
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
 
-    if resume_from is not None and resume_from.is_file():
-        metadata = load_checkpoint(resume_from, model, optimizer)
+    if resume_from is not None:
+        if not resume_from.is_file():
+            raise FileNotFoundError(f"resume checkpoint not found: {resume_from}")
+        metadata = load_training_state(resume_from, model, optimizer)
         if metadata.get("configuration_hash", "") != configuration_hash:
             raise ValueError("resume rejected: configuration hash mismatch")
         if metadata.get("data_fingerprint", "") != data_fingerprint:
             raise ValueError("resume rejected: data fingerprint mismatch")
         if metadata.get("protocol_hash", "") != protocol_hash:
             raise ValueError("resume rejected: protocol hash mismatch")
-        start_epoch = int(metadata["epoch"]) + 1
-        best_epoch = int(metadata.get("best_epoch", metadata["epoch"]))
-        best_score = float(metadata.get("best_validation_metric", float("-inf")))
-        stale_epochs = int(metadata.get("patience_counter", 0))
-        # Restore best state from the checkpoint model
-        best_state = {
-            key: value.detach().cpu().clone() for key, value in model.state_dict().items()
-        }
+        start_epoch = int(metadata["next_epoch"])
+        best_epoch = int(metadata["best_epoch"])
+        best_score = float(metadata["best_validation_metric"])
+        stale_epochs = int(metadata["patience_counter"])
+        stored_best = metadata.get("best_model_state")
+        if stored_best is not None:
+            best_state = {key: value.clone() for key, value in stored_best.items()}
         if start_epoch > max_epochs:
-            # Already completed; return current state
-            pass
+            raise ValueError(
+                f"resume rejected: next epoch {start_epoch} exceeds max_epochs {max_epochs}; "
+                "the resumed run has no epoch left to execute"
+            )
 
-    generator = torch.Generator().manual_seed(seed + start_epoch - 1)
-    loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        generator=generator,
-        num_workers=0,
-    )
     if target_device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(target_device)
     started = time.perf_counter()
+    completed_epoch = start_epoch - 1
+    termination_reason = "max_epochs"
+    final_loss = 0.0
 
     for epoch in range(start_epoch, max_epochs + 1):
+        loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            generator=torch.Generator().manual_seed(epoch_shuffle_seed(seed, epoch)),
+            num_workers=0,
+        )
         model.train()
         for features, labels in loader:
             optimizer.zero_grad(set_to_none=True)
@@ -154,6 +178,7 @@ def fit_torch_classifier(
                 raise FloatingPointError(f"non-finite training loss at epoch {epoch}")
             loss.backward()  # type: ignore[no-untyped-call]
             optimizer.step()
+            final_loss = float(loss.detach().cpu())
         model.eval()
         validation_true, validation_predictions, validation_probabilities, _ = predict_raw(
             model, validation_dataset, target_device, batch_size
@@ -162,16 +187,17 @@ def fit_torch_classifier(
             validation_true, validation_predictions, validation_probabilities
         )
         score = float(validation_metrics["macro_f1"])
-        if score > best_score:
+        improved = score > best_score
+        if improved:
             best_score = score
             best_epoch = epoch
             stale_epochs = 0
             best_state = {
                 key: value.detach().cpu().clone() for key, value in model.state_dict().items()
             }
-            if checkpoint_path is not None:
+            if best_checkpoint_path is not None:
                 save_checkpoint_atomic(
-                    checkpoint_path,
+                    best_checkpoint_path,
                     model,
                     optimizer,
                     epoch=epoch,
@@ -185,20 +211,42 @@ def fit_torch_classifier(
                 )
         else:
             stale_epochs += 1
-            if stale_epochs >= patience:
-                break
+        completed_epoch = epoch
+        if last_checkpoint_path is not None:
+            save_training_state_atomic(
+                last_checkpoint_path,
+                model,
+                optimizer,
+                completed_epoch=epoch,
+                seed=seed,
+                configuration_hash=configuration_hash,
+                data_fingerprint=data_fingerprint,
+                protocol_hash=protocol_hash,
+                best_model_state=best_state,
+                best_epoch=best_epoch,
+                best_validation_metric=best_score,
+                patience_counter=stale_epochs,
+                best_checkpoint_path=(
+                    str(best_checkpoint_path) if best_checkpoint_path is not None else None
+                ),
+            )
+        if not improved and stale_epochs >= patience:
+            termination_reason = "early_stopping"
+            break
 
     if best_state is None or best_epoch == 0:
         raise RuntimeError("training did not produce a validation checkpoint")
     model.eval()
     validation_features, _ = validation_dataset[0]
-    if checkpoint_path is not None:
-        load_checkpoint(checkpoint_path, model, optimizer)
+    # Final evaluation always uses the best-model checkpoint, never the last state.
+    if best_checkpoint_path is not None:
+        load_checkpoint(best_checkpoint_path, model, optimizer)
     else:
         model.load_state_dict(best_state)
+    model.to(target_device)
     expected_output = model(validation_features.unsqueeze(0).to(target_device)).detach().cpu()
-    if checkpoint_path is not None:
-        load_checkpoint(checkpoint_path, model, optimizer)
+    if best_checkpoint_path is not None:
+        load_checkpoint(best_checkpoint_path, model, optimizer)
     else:
         model.load_state_dict(best_state)
     model.to(target_device)
@@ -223,4 +271,9 @@ def fit_torch_classifier(
         inference_latency_ms_per_sample=latency,
         peak_gpu_memory_bytes=peak_memory,
         checkpoint_round_trip=checkpoint_round_trip,
+        actual_epochs_completed=completed_epoch,
+        termination_reason=termination_reason,
+        patience_counter=stale_epochs,
+        best_validation_metric=best_score,
+        final_training_loss=final_loss,
     )

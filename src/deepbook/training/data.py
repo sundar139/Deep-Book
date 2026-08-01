@@ -13,8 +13,13 @@ import yaml
 from deepbook.data.fi2010 import PARSER_VERSION
 from deepbook.data.fi2010.dataset import ParsedMatrix, discover_matrices, parse_matrix
 from deepbook.training.fi2010 import (
+    DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
     ModelingCacheSpec,
+    anchored_fold_fingerprint,
+    combined_testing_sha256,
     configuration_hash,
+    day_group_fingerprint,
+    frozen_data_identity,
     label_to_index,
     load_matrix_cache,
     modeling_cache_path,
@@ -36,6 +41,35 @@ class FoldMatrices:
     archive_sha256: str
     training_file_sha256: str
     testing_file_sha256: str
+    data_fingerprint: str
+
+
+@dataclass(frozen=True)
+class DayMatrices:
+    """One independent audited test-day source file."""
+
+    day_index: int
+    source_fold: int
+    lob: np.ndarray
+    features: np.ndarray
+    labels: np.ndarray
+    file_sha256: str
+    observation_count: int
+
+
+@dataclass(frozen=True)
+class DayGroupMatrices:
+    """Cumulative training matrix plus several independent audited test days."""
+
+    day_group: str
+    training_lob: np.ndarray
+    training_features: np.ndarray
+    training_labels: np.ndarray
+    test_days: tuple[DayMatrices, ...]
+    archive_sha256: str
+    training_file_sha256: str
+    testing_file_sha256: str
+    testing_file_sha256_by_day: dict[str, str]
     data_fingerprint: str
 
 
@@ -81,6 +115,133 @@ def _cache_one(
     return lob, labels
 
 
+@dataclass(frozen=True)
+class _SplitContext:
+    """Resolved audited split records and paths for one experiment configuration."""
+
+    archive_sha256: str
+    extraction_root: Path
+    experiment_hash: str
+    by_fold_role: dict[tuple[int, str], dict[str, Any]]
+
+
+def _split_context(root: Path, experiment_config_path: Path) -> _SplitContext:
+    experiment = _read_yaml(root / experiment_config_path)
+    source_config = _read_yaml(root / str(experiment["source_config"]))
+    archive_sha256 = str(source_config["source"]["archive_sha256"])
+    variant = str(experiment["benchmark_variant"])
+    normalization = str(experiment["normalization"])
+    split_path = root / "data" / "interim" / "fi2010" / "fi2010_split_manifest.json"
+    split_manifest = json.loads(split_path.read_text(encoding="utf-8"))
+    by_fold_role = {
+        (int(record["fold_identifier"]), str(record["role"])): record
+        for record in split_manifest["splits"]
+        if record["benchmark_variant"] == variant and record["normalization"] == normalization
+    }
+    return _SplitContext(
+        archive_sha256=archive_sha256,
+        extraction_root=root / "data" / "raw" / "fi2010" / "extracted" / archive_sha256,
+        experiment_hash=configuration_hash(experiment),
+        by_fold_role=by_fold_role,
+    )
+
+
+def _require_record(context: _SplitContext, fold: int, role: str) -> dict[str, Any]:
+    record = context.by_fold_role.get((int(fold), role))
+    if record is None:
+        raise ValueError(f"audited split manifest has no {role} record for fold {fold}")
+    return record
+
+
+def load_day_group(
+    root: Path,
+    day_group: str = DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
+    *,
+    experiment_config_path: Path = Path("configs/experiments/fi2010/classical.yaml"),
+) -> DayGroupMatrices:
+    """Load the first-seven/final-three setup from audited files only.
+
+    Training is the single cumulative days 1-7 matrix. Each of days 8, 9, and 10
+    is a separate audited daily file, kept separate so windows never cross a day
+    boundary and no test observation is duplicated.
+    """
+    frozen = frozen_data_identity(root)
+    group = frozen["day_groups"].get(str(day_group))
+    if group is None:
+        raise ValueError(f"frozen contract declares no day group: {day_group}")
+    context = _split_context(root, experiment_config_path)
+    if context.archive_sha256 != str(frozen["archive_sha256"]):
+        raise ValueError("archive digest does not match the frozen data identity contract")
+
+    training_record = _require_record(context, int(group["training_fold"]), "training")
+    if str(training_record["file_sha256"]) != str(group["training_file_sha256"]):
+        raise ValueError("days 1-7 training file digest does not match the frozen contract")
+    if int(training_record["observation_count"]) != int(group["training_observations"]):
+        raise ValueError("days 1-7 training observation count does not match the frozen contract")
+    train_lob, train_labels = _cache_one(
+        root=root,
+        extraction_root=context.extraction_root,
+        record=training_record,
+        experiment_configuration_hash=context.experiment_hash,
+        archive_sha256=context.archive_sha256,
+    )
+
+    test_days: list[DayMatrices] = []
+    seen_days: set[int] = set()
+    seen_digests: set[str] = set()
+    for day in group["test_days"]:
+        day_index = int(day["day_index"])
+        if day_index in seen_days:
+            raise ValueError(f"frozen contract repeats test day {day_index}")
+        record = _require_record(context, int(day["source_fold"]), "testing")
+        digest = str(record["file_sha256"])
+        if digest != str(day["file_sha256"]):
+            raise ValueError(f"test day {day_index} file digest does not match the frozen contract")
+        if digest in seen_digests:
+            raise ValueError(f"test day {day_index} reuses an already-selected source file")
+        if int(record["observation_count"]) != int(day["observations"]):
+            raise ValueError(f"test day {day_index} observation count does not match the contract")
+        lob, labels = _cache_one(
+            root=root,
+            extraction_root=context.extraction_root,
+            record=record,
+            experiment_configuration_hash=context.experiment_hash,
+            archive_sha256=context.archive_sha256,
+        )
+        seen_days.add(day_index)
+        seen_digests.add(digest)
+        test_days.append(
+            DayMatrices(
+                day_index=day_index,
+                source_fold=int(day["source_fold"]),
+                lob=lob[:40],
+                features=np.asarray(lob, dtype=np.float32),
+                labels=labels,
+                file_sha256=digest,
+                observation_count=int(record["observation_count"]),
+            )
+        )
+
+    testing_by_day = {str(day.day_index): day.file_sha256 for day in test_days}
+    return DayGroupMatrices(
+        day_group=str(day_group),
+        training_lob=train_lob[:40],
+        training_features=np.asarray(train_lob, dtype=np.float32),
+        training_labels=train_labels,
+        test_days=tuple(sorted(test_days, key=lambda day: day.day_index)),
+        archive_sha256=context.archive_sha256,
+        training_file_sha256=str(training_record["file_sha256"]),
+        testing_file_sha256=combined_testing_sha256(testing_by_day),
+        testing_file_sha256_by_day=testing_by_day,
+        data_fingerprint=day_group_fingerprint(
+            context.archive_sha256,
+            str(day_group),
+            str(training_record["file_sha256"]),
+            testing_by_day,
+        ),
+    )
+
+
 def load_fold(
     root: Path,
     fold: int,
@@ -88,27 +249,11 @@ def load_fold(
     experiment_config_path: Path = Path("configs/experiments/fi2010/classical.yaml"),
 ) -> FoldMatrices:
     """Load one fold exclusively from the audited split manifest."""
-    experiment_path = root / experiment_config_path
-    experiment = _read_yaml(experiment_path)
-    source_config_path = root / str(experiment["source_config"])
-    source_config = _read_yaml(source_config_path)
-    archive_sha256 = str(source_config["source"]["archive_sha256"])
-    variant = str(experiment["benchmark_variant"])
-    normalization = str(experiment["normalization"])
-    split_path = root / "data" / "interim" / "fi2010" / "fi2010_split_manifest.json"
-    split_manifest = json.loads(split_path.read_text(encoding="utf-8"))
-    records = [
-        record
-        for record in split_manifest["splits"]
-        if int(record["fold_identifier"]) == fold
-        and record["benchmark_variant"] == variant
-        and record["normalization"] == normalization
-    ]
-    by_role = {str(record["role"]): record for record in records}
-    if set(by_role) != {"training", "testing"}:
-        raise ValueError(f"audited fold {fold} does not have one training and one testing record")
-    extraction_root = root / "data" / "raw" / "fi2010" / "extracted" / archive_sha256
-    experiment_hash = configuration_hash(experiment)
+    context = _split_context(root, experiment_config_path)
+    archive_sha256 = context.archive_sha256
+    by_role = {role: _require_record(context, fold, role) for role in ("training", "testing")}
+    extraction_root = context.extraction_root
+    experiment_hash = context.experiment_hash
     train_lob, train_labels = _cache_one(
         root=root,
         extraction_root=extraction_root,
@@ -125,13 +270,12 @@ def load_fold(
     )
     train_features = np.asarray(train_lob, dtype=np.float32)
     test_features = np.asarray(test_lob, dtype=np.float32)
-    payload = {
-        "archive_sha256": archive_sha256,
-        "fold": fold,
-        "training_file_sha256": by_role["training"]["file_sha256"],
-        "testing_file_sha256": by_role["testing"]["file_sha256"],
-    }
-    fingerprint = configuration_hash(payload)
+    fingerprint = anchored_fold_fingerprint(
+        archive_sha256,
+        fold,
+        str(by_role["training"]["file_sha256"]),
+        str(by_role["testing"]["file_sha256"]),
+    )
     return FoldMatrices(
         fold=fold,
         training_lob=train_lob[:40],

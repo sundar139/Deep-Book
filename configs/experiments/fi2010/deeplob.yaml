@@ -35,6 +35,15 @@ training:
   mixed_precision: false
   gradient_clipping: null
   scheduler: null
+setups:
+  anchored_forward:
+    folds: 9
+    train_days: cumulative
+    test_day: fold_plus_one
+  first_seven_final_three:
+    day_group: days_8_9_10
+    train_days: [1, 2, 3, 4, 5, 6, 7]
+    test_days: [8, 9, 10]
 validation:
   policy: chronological_training_only
   purge_events: 200

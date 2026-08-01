@@ -20,8 +20,11 @@ import yaml
 from deepbook.evaluation.classification import classification_metrics
 from deepbook.evaluation.prediction import load_prediction_artifact, sha256_file
 from deepbook.training.fi2010 import (
+    FROZEN_DATA_IDENTITY_PATH,
     check_protocol_ancestry,
     configuration_hash,
+    expected_archive_sha256,
+    expected_data_fingerprint,
     protocol_sha256,
     validate_run_manifest,
 )
@@ -32,7 +35,9 @@ def _find_repo_root() -> Path:
 
 
 def _cmd_prepare(root: Path) -> int:
-    """Verify data contracts and cache readiness."""
+    """Verify data contracts, frozen identity, and planning, then persist the run index."""
+    from deepbook.training.runner import planned_run_specs, write_run_index
+
     config_path = root / "configs" / "data" / "fi2010.yaml"
     if not config_path.is_file():
         print(f"ERROR: data config not found: {config_path}", file=sys.stderr)
@@ -41,15 +46,25 @@ def _cmd_prepare(root: Path) -> int:
     if not split_path.is_file():
         print(f"ERROR: split manifest not found: {split_path}", file=sys.stderr)
         return 1
+    frozen_path = root / FROZEN_DATA_IDENTITY_PATH
+    if not frozen_path.is_file():
+        print(f"ERROR: frozen data identity not found: {frozen_path}", file=sys.stderr)
+        return 1
+    specs = planned_run_specs(root)
+    index_path = write_run_index(root)
+    print(f"Planned matrix cells: {len(specs)}")
+    print(f"Run index: {index_path}")
     print("Preparation checks passed.")
     return 0
 
 
 def _cmd_report(root: Path) -> int:
-    """Generate deterministic JSON and Markdown reports from run manifests."""
-    from deepbook.training.runner import write_report
+    """Generate the deterministic run index and JSON/Markdown reports from manifests."""
+    from deepbook.training.runner import write_report, write_run_index
 
     paths = write_report(root)
+    index_path = write_run_index(root)
+    print(f"Run index: {index_path}")
     print(f"Report JSON: {paths[0]}")
     print(f"Report Markdown: {paths[1]}")
     return 0
@@ -137,36 +152,73 @@ def _cmd_verify_run(root: Path, run_id: str) -> int:
     else:
         print("WARNING: no configuration_path in manifest; skipping config hash check")
 
-    # 6. Verify checkpoint
+    # 6. Verify frozen FI-2010 data identity
+    setup = str(manifest.get("setup", ""))
+    try:
+        frozen_fingerprint = expected_data_fingerprint(
+            root,
+            setup=setup,
+            fold=manifest.get("fold"),
+            day_group=manifest.get("day_group"),
+        )
+    except (KeyError, ValueError) as exc:
+        return _fail(f"frozen data identity could not be resolved: {exc}")
+    if manifest.get("data_fingerprint", "") != frozen_fingerprint:
+        return _fail(
+            f"data fingerprint does not match the frozen FI-2010 data identity: "
+            f"manifest={str(manifest.get('data_fingerprint', ''))[:16]}... "
+            f"frozen={frozen_fingerprint[:16]}..."
+        )
+    if manifest.get("archive_sha256", "") != expected_archive_sha256(root):
+        return _fail("archive SHA-256 does not match the frozen authoritative archive")
+    print(f"Frozen data identity verified: {frozen_fingerprint[:16]}...")
+
+    # 7. Verify checkpoints
     model_name = manifest.get("model", "")
     is_neural = model_name in _NEURAL_MODELS
-    checkpoint_path_str = manifest.get("checkpoint_path")
-    checkpoint_sha = manifest.get("checkpoint_sha256")
+    checkpoint_path_str = manifest.get("best_checkpoint_path") or manifest.get("checkpoint_path")
+    checkpoint_sha = manifest.get("best_checkpoint_sha256") or manifest.get("checkpoint_sha256")
 
     if is_neural and not checkpoint_path_str:
-        return _fail("neural model requires checkpoint_path")
+        return _fail("neural model requires best_checkpoint_path")
     if is_neural and not checkpoint_sha:
-        return _fail("neural model requires checkpoint_sha256")
+        return _fail("neural model requires best_checkpoint_sha256")
 
     if checkpoint_path_str:
         cp_path = Path(checkpoint_path_str)
         if not cp_path.is_file():
-            return _fail(f"checkpoint not found: {cp_path}")
+            return _fail(f"best-model checkpoint not found: {cp_path}")
         actual = sha256_file(cp_path)
         if checkpoint_sha and actual != checkpoint_sha:
             return _fail(
-                f"checkpoint SHA-256 mismatch: manifest={checkpoint_sha[:16]}... "
+                f"best checkpoint SHA-256 mismatch: manifest={checkpoint_sha[:16]}... "
                 f"actual={actual[:16]}..."
             )
-        print(f"Checkpoint SHA-256 verified: {actual[:16]}...")
+        print(f"Best checkpoint SHA-256 verified: {actual[:16]}...")
     elif checkpoint_sha is not None:
-        print("Checkpoint SHA-256 recorded as null (classical model)")
+        print("Best checkpoint SHA-256 recorded as null (classical model)")
     else:
-        print("Checkpoint SHA-256: not recorded")
+        print("Best checkpoint SHA-256: not recorded")
 
-    # 7. Verify prediction artifact
+    last_path_str = manifest.get("last_checkpoint_path")
+    last_sha = manifest.get("last_checkpoint_sha256")
+    if last_path_str and last_sha:
+        last_path = Path(last_path_str)
+        if not last_path.is_file():
+            return _fail(f"last-state checkpoint not found: {last_path}")
+        actual_last = sha256_file(last_path)
+        if actual_last != last_sha:
+            return _fail(
+                f"last checkpoint SHA-256 mismatch: manifest={last_sha[:16]}... "
+                f"actual={actual_last[:16]}..."
+            )
+        print(f"Last-state checkpoint SHA-256 verified: {actual_last[:16]}...")
+
+    # 8. Verify prediction artifact
     pred_path_str = manifest.get("prediction_path")
     pred_sha = manifest.get("prediction_sha256")
+    if manifest.get("status") == "completed" and not (pred_path_str and pred_sha):
+        return _fail("a completed run must record prediction_path and prediction_sha256")
     if pred_path_str and pred_sha:
         pp = Path(pred_path_str)
         if not pp.is_file():
@@ -178,7 +230,10 @@ def _cmd_verify_run(root: Path, run_id: str) -> int:
             )
         print(f"Prediction SHA-256 verified: {actual[:16]}...")
 
-        preds = load_prediction_artifact(pp)
+        try:
+            preds = load_prediction_artifact(pp)
+        except (ValueError, OSError) as exc:
+            return _fail(f"prediction artifact could not be loaded: {exc}")
 
         # Verify sample count
         manifest_sample_count = manifest.get("sample_count")
@@ -196,6 +251,26 @@ def _cmd_verify_run(root: Path, run_id: str) -> int:
         # Class order
         if tuple(preds.get("class_order", [])) != ("up", "stationary", "down"):
             return _fail(f"class_order mismatch: {tuple(preds.get('class_order', []))}")
+
+        # Day boundary identity must match the manifest's audited source mapping
+        day_index_map = manifest.get("day_index_map") or {}
+        if day_index_map:
+            observed_days = {int(value) for value in preds["day_boundary_id"].tolist()}
+            declared_days = {int(key) for key in day_index_map}
+            if observed_days != declared_days:
+                return _fail(
+                    f"day_boundary_id values {sorted(observed_days)} do not match "
+                    f"the manifest day_index_map {sorted(declared_days)}"
+                )
+            for day, entry in sorted(day_index_map.items(), key=lambda item: int(item[0])):
+                mask = preds["day_boundary_id"] == int(day)
+                sources = {int(value) for value in preds["source_file_id"][mask].tolist()}
+                if sources != {int(entry["source_fold"])}:
+                    return _fail(
+                        f"day {day} carries source_file_id {sorted(sources)}, "
+                        f"expected {entry['source_fold']}"
+                    )
+            print(f"Day boundary identity verified for days {sorted(declared_days)}.")
 
         # Verify probabilities are valid
         proba = np.asarray(preds["probabilities"], dtype=np.float64)

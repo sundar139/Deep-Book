@@ -27,7 +27,8 @@ def test_torch_fit_has_validation_metrics_and_round_trip(tmp_path: Path) -> None
         batch_size=4,
         learning_rate=1e-3,
         device="cpu",
-        checkpoint_path=tmp_path / "best.pt",
+        best_checkpoint_path=tmp_path / "run.best.pt",
+        last_checkpoint_path=tmp_path / "run.last.pt",
     )
 
     assert result.best_epoch in {1, 2}
@@ -38,3 +39,8 @@ def test_torch_fit_has_validation_metrics_and_round_trip(tmp_path: Path) -> None
     assert result.training_seconds >= 0.0
     assert result.peak_gpu_memory_bytes == 0
     assert torch.isfinite(torch.tensor(result.validation_metrics["nll"]))
+
+    assert result.termination_reason in {"early_stopping", "max_epochs"}
+    assert 1 <= result.best_epoch <= result.actual_epochs_completed <= 2
+    assert (tmp_path / "run.best.pt").is_file()
+    assert (tmp_path / "run.last.pt").is_file()

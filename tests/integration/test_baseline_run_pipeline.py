@@ -1,14 +1,21 @@
-"""End-to-end pipeline test using synthetic data only."""
+"""End-to-end pipeline tests driving the real production orchestration.
+
+Every test here runs the same ``execute_run`` the CLI runs, against a synthetic
+repository root and a synthetic data provider. Nothing about the run, manifest,
+eligibility, index, report, or verification path is reimplemented in the test.
+"""
 
 from __future__ import annotations
 
 import json
-import tempfile
+import shutil
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from deepbook.cli.fi2010_baselines import _cmd_prepare, _cmd_report, _cmd_verify_run
 from deepbook.evaluation.classification import classification_metrics
 from deepbook.evaluation.prediction import (
     load_prediction_artifact,
@@ -17,56 +24,409 @@ from deepbook.evaluation.prediction import (
     sha256_file,
 )
 from deepbook.training.fi2010 import (
-    build_run_manifest,
-    configuration_hash,
-    protocol_sha256,
-    resolve_protocol_commit,
+    DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
+    SETUP_ANCHORED_FORWARD,
+    SETUP_FIRST_SEVEN_FINAL_THREE,
+    expected_archive_sha256,
+    expected_data_fingerprint,
+    frozen_data_identity,
     validate_run_manifest,
+)
+from deepbook.training.runner import (
+    RunData,
+    RunSpec,
+    SourceSegment,
+    execute_run,
+    generate_run_index,
+    run_paths,
+    write_report,
+    write_run_index,
+)
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+TRACKED_INPUTS = (
+    # The real ignore rules come along so generated artifacts leave the tree clean,
+    # exactly as they do in the repository.
+    ".gitignore",
+    "data_contracts/fi2010_run_manifest.schema.json",
+    "configs/data/fi2010.yaml",
+    "configs/references/fi2010_frozen_data_identity.yaml",
+    "configs/references/deeplob_fi2010.yaml",
+    "configs/experiments/fi2010/classical.yaml",
+    "configs/experiments/fi2010/mlplob.yaml",
+    "configs/experiments/fi2010/deeplob.yaml",
+    "reports/protocol/fi2010_baseline_reproduction.md",
 )
 
 
-def _root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def _git(root: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", *arguments],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
 
 
-def _minimal_manifest_kwargs(**overrides) -> dict:
-    root = _root()
-    return {
-        "run_id": "test-run",
-        "code_commit": "0" * 40,
-        "dirty": False,
-        "model": "test_model",
-        "setup": "anchored_forward",
-        "fold": 1,
-        "horizon": 10,
-        "seed": 1337,
-        "data_fingerprint": "test_fingerprint",
-        "configuration_hash": "a" * 64,
-        "configuration_path": "configs/experiments/fi2010/classical.yaml",
-        "status": "completed",
-        "metrics": {"accuracy": 0.5},
-        "run_kind": "smoke",
-        "eligible_for_confirmatory_report": False,
-        "exclusion_reasons": [],
-        "protocol_commit": resolve_protocol_commit(root),
-        "protocol_sha256": protocol_sha256(root),
-        "configured_max_epochs": None,
-        "actual_epochs_completed": None,
-        "best_epoch": None,
-        "termination_reason": "not_applicable",
-        "resumed": False,
-        "resumed_from_run_id": None,
-        "day_group": None,
-        "started_utc": "2026-01-01T00:00:00Z",
-        "completed_utc": "2026-01-01T00:01:00Z",
-        "archive_sha256": "c" * 64,
-        "training_file_sha256": "d" * 64,
-        "testing_file_sha256": "e" * 64,
-        "parameter_count": 0,
-        "device": "cpu",
-        "environment": {"python": "3.11"},
-        **overrides,
-    }
+@pytest.fixture
+def synthetic_root(tmp_path: Path) -> Path:
+    """A committed repository root carrying the real frozen contract files."""
+    root = tmp_path / "repository"
+    for relative in TRACKED_INPUTS:
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPOSITORY_ROOT / relative, destination)
+    interim = root / "data" / "interim" / "fi2010"
+    interim.mkdir(parents=True, exist_ok=True)
+    (interim / "fi2010_split_manifest.json").write_text(
+        json.dumps({"schema_version": 1, "splits": []}), encoding="utf-8"
+    )
+    _git(root, "init", "--quiet", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "--quiet", "-m", "synthetic frozen contract")
+    return root
+
+
+def _segment(day_index: int, source_fold: int, observations: int, digest: str) -> SourceSegment:
+    rng = np.random.default_rng(day_index * 17)
+    classes = rng.integers(0, 3, observations)
+    lob = (rng.standard_normal((40, observations)) * 0.4 + classes * 1.5).astype(np.float32)
+    engineered = rng.standard_normal((104, observations)).astype(np.float32)
+    labels = np.tile(classes + 1, (5, 1)).astype(np.int8)
+    return SourceSegment(
+        day_index=day_index,
+        source_fold=source_fold,
+        file_sha256=digest,
+        lob=lob,
+        features=np.concatenate([lob, engineered]),
+        labels=labels,
+    )
+
+
+def _training(observations: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(3)
+    classes = rng.integers(0, 3, observations)
+    lob = (rng.standard_normal((40, observations)) * 0.4 + classes * 1.5).astype(np.float32)
+    engineered = rng.standard_normal((104, observations)).astype(np.float32)
+    labels = np.tile(classes + 1, (5, 1)).astype(np.int8)
+    return lob, np.concatenate([lob, engineered]), labels
+
+
+def _provider(root: Path, observations: int = 2400, test_observations: int = 260):
+    """Return a run-data provider matching the frozen contract for either setup."""
+    frozen = frozen_data_identity(root)
+
+    def provide(provider_root: Path, spec: RunSpec, _config_path: str) -> RunData:
+        training_lob, training_features, training_labels = _training(observations)
+        if spec.setup == SETUP_ANCHORED_FORWARD:
+            entry = frozen["folds"][int(spec.fold or 1)]
+            segments = (
+                _segment(
+                    int(entry["testing_day_index"]),
+                    int(spec.fold or 1),
+                    test_observations,
+                    str(entry["testing_file_sha256"]),
+                ),
+            )
+            training_digest = str(entry["training_file_sha256"])
+            by_day = {str(entry["testing_day_index"]): str(entry["testing_file_sha256"])}
+        else:
+            group = frozen["day_groups"][str(spec.day_group)]
+            segments = tuple(
+                _segment(
+                    int(day["day_index"]),
+                    int(day["source_fold"]),
+                    test_observations,
+                    str(day["file_sha256"]),
+                )
+                for day in group["test_days"]
+            )
+            training_digest = str(group["training_file_sha256"])
+            by_day = {str(day["day_index"]): str(day["file_sha256"]) for day in group["test_days"]}
+        return RunData(
+            setup=spec.setup,
+            fold=spec.fold,
+            day_group=spec.day_group,
+            training_lob=training_lob,
+            training_features=training_features,
+            training_labels=training_labels,
+            test_segments=segments,
+            archive_sha256=expected_archive_sha256(provider_root),
+            training_file_sha256=training_digest,
+            testing_file_sha256=str(frozen["archive_sha256"]),
+            testing_file_sha256_by_day=by_day,
+            data_fingerprint=expected_data_fingerprint(
+                provider_root,
+                setup=spec.setup,
+                fold=spec.fold,
+                day_group=spec.day_group,
+            ),
+        )
+
+    return provide
+
+
+def _classical_spec(setup: str = SETUP_ANCHORED_FORWARD) -> RunSpec:
+    if setup == SETUP_ANCHORED_FORWARD:
+        return RunSpec(model="majority", setup=setup, horizon=10, seed=1337, fold=1)
+    return RunSpec(
+        model="majority",
+        setup=setup,
+        horizon=10,
+        seed=1337,
+        day_group=DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
+    )
+
+
+class TestProductionOrchestration:
+    """The CLI's own run, index, report, and verification path end to end."""
+
+    def test_confirmatory_classical_run_completes_the_whole_pipeline(
+        self, synthetic_root: Path
+    ) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+
+        manifest_path = run_paths(artifacts).runs / f"{spec.run_id}.json"
+        assert manifest_path.is_file()
+        validate_run_manifest(
+            json.loads(manifest_path.read_text(encoding="utf-8")),
+            synthetic_root / "data_contracts" / "fi2010_run_manifest.schema.json",
+        )
+        assert manifest["exclusion_reasons"] == []
+        assert manifest["eligible_for_confirmatory_report"] is True
+        assert manifest["run_kind"] == "confirmatory"
+        assert manifest["termination_reason"] == "not_applicable"
+        assert manifest["configured_max_epochs"] is None
+        assert manifest["best_checkpoint_path"] is None
+
+        prediction_path = Path(manifest["prediction_path"])
+        assert prediction_path.is_file()
+        assert sha256_file(prediction_path) == manifest["prediction_sha256"]
+        payload = load_prediction_artifact(prediction_path)
+        valid = payload["y_pred"] >= 0
+        recomputed = classification_metrics(
+            payload["y_true"][valid], payload["y_pred"][valid], payload["probabilities"][valid]
+        )
+        assert recomputed["macro_f1"] == pytest.approx(manifest["metrics"]["test"]["macro_f1"])
+
+        index = json.loads(write_run_index(synthetic_root, artifacts).read_text(encoding="utf-8"))
+        assert index["completed_confirmatory"] == [spec.run_id]
+        assert index["duplicate_logical_identities"] == []
+
+        json_path, markdown_path = write_report(synthetic_root, artifacts)
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+        assert [m["run_id"] for m in report["confirmatory_runs"]] == [spec.run_id]
+        assert "INCOMPLETE" in markdown_path.read_text(encoding="utf-8")
+
+        assert _cmd_verify_run(synthetic_root, spec.run_id) == 0
+
+    def test_smoke_run_is_excluded_by_the_orchestrator(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            smoke=True,
+            run_data_provider=_provider(synthetic_root),
+        )
+        assert manifest["run_kind"] == "smoke"
+        assert manifest["eligible_for_confirmatory_report"] is False
+        assert "run explicitly marked as smoke" in manifest["exclusion_reasons"]
+
+        index = generate_run_index(synthetic_root, artifacts)
+        assert index["completed_confirmatory"] == []
+        assert index["completed_smoke"] == [spec.run_id]
+
+        json_path, _ = write_report(synthetic_root, artifacts)
+        report = json.loads(json_path.read_text(encoding="utf-8"))
+        assert report["confirmatory_runs"] == []
+        assert [m["run_id"] for m in report["smoke_runs"]] == [spec.run_id]
+
+    def test_tiny_neural_run_writes_best_and_last_checkpoints(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = RunSpec(model="mlplob", setup=SETUP_ANCHORED_FORWARD, horizon=10, seed=1337, fold=1)
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            max_epochs=2,
+            smoke=True,
+            run_data_provider=_provider(synthetic_root, observations=2400, test_observations=400),
+        )
+        assert manifest["model"] == "mlplob"
+        assert manifest["termination_reason"] in {"early_stopping", "max_epochs"}
+        assert 1 <= manifest["actual_epochs_completed"] <= manifest["configured_max_epochs"]
+        assert 1 <= manifest["best_epoch"] <= manifest["actual_epochs_completed"]
+
+        best = Path(manifest["best_checkpoint_path"])
+        last = Path(manifest["last_checkpoint_path"])
+        assert best.is_file() and last.is_file()
+        assert best != last
+        assert sha256_file(best) == manifest["best_checkpoint_sha256"]
+        assert sha256_file(last) == manifest["last_checkpoint_sha256"]
+        assert manifest["checkpoint_round_trip"]["passed"] is True
+        assert _cmd_verify_run(synthetic_root, spec.run_id) == 0
+
+    def test_setup_two_run_keeps_three_independent_days(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec(SETUP_FIRST_SEVEN_FINAL_THREE)
+        per_day = 260
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root, test_observations=per_day),
+        )
+        assert manifest["setup"] == SETUP_FIRST_SEVEN_FINAL_THREE
+        assert manifest["fold"] is None
+        assert manifest["day_group"] == DAY_GROUP_FIRST_SEVEN_FINAL_THREE
+        assert sorted(manifest["day_index_map"]) == ["10", "8", "9"]
+        assert manifest["sample_count"] == 3 * per_day
+
+        payload = load_prediction_artifact(Path(manifest["prediction_path"]))
+        for day, source_fold in ((8, 7), (9, 8), (10, 9)):
+            mask = payload["day_boundary_id"] == day
+            assert int(mask.sum()) == per_day
+            assert set(payload["source_file_id"][mask].tolist()) == {source_fold}
+        assert sorted(manifest["metrics"]["test_by_day"]) == ["10", "8", "9"]
+        assert _cmd_verify_run(synthetic_root, spec.run_id) == 0
+
+    def test_prepare_and_report_both_persist_the_run_index(self, synthetic_root: Path) -> None:
+        index_path = synthetic_root / "artifacts" / "fi2010" / "baselines" / "run_index.json"
+        assert not index_path.exists()
+        assert _cmd_prepare(synthetic_root) == 0
+        assert index_path.is_file()
+
+        index_path.unlink()
+        assert _cmd_report(synthetic_root) == 0
+        assert index_path.is_file()
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+        assert payload["planned_cell_count"] == 900
+
+    def test_report_artifacts_are_byte_identical_across_unchanged_runs(
+        self, synthetic_root: Path
+    ) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        execute_run(
+            synthetic_root,
+            _classical_spec(),
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        json_path, markdown_path = write_report(synthetic_root, artifacts)
+        index_path = write_run_index(synthetic_root, artifacts)
+        first = (json_path.read_bytes(), markdown_path.read_bytes(), index_path.read_bytes())
+
+        write_report(synthetic_root, artifacts)
+        write_run_index(synthetic_root, artifacts)
+        second = (json_path.read_bytes(), markdown_path.read_bytes(), index_path.read_bytes())
+        assert first == second
+
+    def test_duplicate_logical_identity_blocks_confirmatory_aggregation(
+        self, synthetic_root: Path
+    ) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        assert manifest["eligible_for_confirmatory_report"] is True
+
+        clone = dict(manifest)
+        clone["run_id"] = f"{spec.run_id}-rerun"
+        (run_paths(artifacts).runs / f"{clone['run_id']}.json").write_text(
+            json.dumps(clone, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        index = generate_run_index(synthetic_root, artifacts)
+        assert index["completed_confirmatory"] == []
+        assert len(index["duplicate_logical_identities"]) == 1
+        json_path, _ = write_report(synthetic_root, artifacts)
+        assert json.loads(json_path.read_text(encoding="utf-8"))["confirmatory_runs"] == []
+
+    def test_verify_run_rejects_tampering_without_crashing(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        manifest_path = run_paths(artifacts).runs / f"{spec.run_id}.json"
+        original = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert _cmd_verify_run(synthetic_root, spec.run_id) == 0
+
+        for field, value in (
+            ("configuration_hash", "a" * 64),
+            ("protocol_sha256", "b" * 64),
+            ("data_fingerprint", "c" * 64),
+            ("archive_sha256", "d" * 64),
+            ("sample_count", 999_999),
+            ("protocol_commit", "f" * 40),
+            ("prediction_sha256", "e" * 64),
+        ):
+            manifest_path.write_text(
+                json.dumps({**original, field: value}, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            assert _cmd_verify_run(synthetic_root, spec.run_id) == 1, field
+        manifest_path.write_text(json.dumps(original, indent=2, sort_keys=True), encoding="utf-8")
+
+        # A structurally corrupt artifact fails verification instead of raising.
+        prediction = Path(manifest["prediction_path"])
+        payload = dict(np.load(prediction, allow_pickle=False))
+        payload["day_boundary_id"] = payload["day_boundary_id"][:-5]
+        np.savez_compressed(prediction, **payload)
+        manifest_path.write_text(
+            json.dumps(
+                {**original, "prediction_sha256": sha256_file(prediction)},
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        assert _cmd_verify_run(synthetic_root, spec.run_id) == 1
+
+    def test_dirty_tree_makes_a_run_ineligible(self, synthetic_root: Path) -> None:
+        (synthetic_root / "untracked.txt").write_text("dirty", encoding="utf-8")
+        manifest = execute_run(
+            synthetic_root,
+            _classical_spec(),
+            artifact_root=synthetic_root / "artifacts" / "fi2010" / "baselines",
+            run_data_provider=_provider(synthetic_root),
+        )
+        assert manifest["eligible_for_confirmatory_report"] is False
+        assert "git tree is dirty" in manifest["exclusion_reasons"]
+
+    def test_changed_frozen_data_identity_makes_a_run_ineligible(
+        self, synthetic_root: Path
+    ) -> None:
+        provider = _provider(synthetic_root)
+
+        def tampered(root: Path, spec: RunSpec, config_path: str) -> RunData:
+            data = provider(root, spec, config_path)
+            return RunData(**{**data.__dict__, "data_fingerprint": "0" * 64})
+
+        manifest = execute_run(
+            synthetic_root,
+            _classical_spec(),
+            artifact_root=synthetic_root / "artifacts" / "fi2010" / "baselines",
+            run_data_provider=tampered,
+        )
+        assert manifest["eligible_for_confirmatory_report"] is False
+        assert any(
+            "frozen FI-2010 data identity" in reason for reason in manifest["exclusion_reasons"]
+        )
 
 
 def _make_synthetic_predictions(n: int = 200) -> dict[str, np.ndarray]:
@@ -74,8 +434,7 @@ def _make_synthetic_predictions(n: int = 200) -> dict[str, np.ndarray]:
     y_true = rng.integers(0, 3, size=n).astype(np.int64)
     y_pred = rng.integers(0, 3, size=n).astype(np.int64)
     proba = np.eye(3)[y_pred].astype(np.float64)
-    jitter = rng.uniform(0, 0.05, size=proba.shape)
-    proba = proba + jitter
+    proba = proba + rng.uniform(0, 0.05, size=proba.shape)
     proba /= proba.sum(axis=1, keepdims=True)
     return {
         "y_true": y_true,
@@ -83,149 +442,28 @@ def _make_synthetic_predictions(n: int = 200) -> dict[str, np.ndarray]:
         "probabilities": proba,
         "sample_index": np.arange(n, dtype=np.int64),
         "source_file_id": np.full(n, 1, dtype=np.int64),
-        "day_boundary_id": np.zeros(n, dtype=np.int64),
+        "day_boundary_id": np.full(n, 2, dtype=np.int64),
     }
 
 
-class TestBaselineRunPipeline:
-    """End-to-end synthetic pipeline: predict, save, manifest, validate, recompute."""
+class TestPredictionArtifacts:
+    """Round-trip and recomputation guarantees for the persisted arrays."""
 
-    def test_prediction_artifact_roundtrip(self) -> None:
+    def test_prediction_artifact_roundtrip(self, tmp_path: Path) -> None:
         preds = _make_synthetic_predictions(100)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "test.npz"
-            save_prediction_artifact(
-                path,
-                y_true=preds["y_true"],
-                y_pred=preds["y_pred"],
-                probabilities=preds["probabilities"],
-                sample_index=preds["sample_index"],
-                source_file_id=preds["source_file_id"],
-                day_boundary_id=preds["day_boundary_id"],
-            )
-            assert path.is_file()
-            loaded = load_prediction_artifact(path)
-            assert np.array_equal(loaded["y_true"], preds["y_true"])
-            assert np.array_equal(loaded["y_pred"], preds["y_pred"])
-            assert np.allclose(loaded["probabilities"], preds["probabilities"])
-            assert tuple(loaded["class_order"]) == ("up", "stationary", "down")
+        path = tmp_path / "test.npz"
+        save_prediction_artifact(path, **preds)  # type: ignore[arg-type]
+        loaded = load_prediction_artifact(path)
+        assert np.array_equal(loaded["y_true"], preds["y_true"])
+        assert np.array_equal(loaded["y_pred"], preds["y_pred"])
+        assert np.allclose(loaded["probabilities"], preds["probabilities"])
+        assert tuple(loaded["class_order"]) == ("up", "stationary", "down")
+        assert loaded["day_boundary_id"].dtype == np.int64
 
     def test_metric_recomputation_from_artifact(self) -> None:
         preds = _make_synthetic_predictions(200)
-        metrics_direct = classification_metrics(
-            preds["y_true"], preds["y_pred"], preds["probabilities"]
-        )
-        metrics_from_artifact = recompute_metrics_from_artifact(preds)
+        direct = classification_metrics(preds["y_true"], preds["y_pred"], preds["probabilities"])
+        from_artifact = recompute_metrics_from_artifact(preds)
         for key in ("macro_f1", "mcc", "accuracy", "balanced_accuracy", "nll", "brier", "ece"):
-            assert np.allclose(
-                float(metrics_direct[key]),
-                float(metrics_from_artifact[key]),
-                rtol=1e-10,
-                atol=1e-8,
-            ), f"Mismatch for {key}"
-        assert metrics_direct["confusion_matrix"] == metrics_from_artifact["confusion_matrix"]
-
-    def test_manifest_validation_with_prediction_hash(self) -> None:
-        preds = _make_synthetic_predictions(50)
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            pred_path = tmp / "predictions" / "test-run.npz"
-            save_prediction_artifact(
-                pred_path,
-                y_true=preds["y_true"],
-                y_pred=preds["y_pred"],
-                probabilities=preds["probabilities"],
-                sample_index=preds["sample_index"],
-                source_file_id=preds["source_file_id"],
-                day_boundary_id=preds["day_boundary_id"],
-            )
-            pred_hash = sha256_file(pred_path)
-            metrics = classification_metrics(
-                preds["y_true"], preds["y_pred"], preds["probabilities"]
-            )
-            config = {"training": {"max_epochs": 50}}
-            manifest = build_run_manifest(
-                run_id="test-run",
-                code_commit="0" * 40,
-                dirty=False,
-                model="test_model",
-                setup="anchored_forward",
-                fold=1,
-                horizon=10,
-                seed=1337,
-                data_fingerprint="test_fingerprint",
-                configuration_hash=configuration_hash(config),
-                configuration_path="configs/experiments/fi2010/classical.yaml",
-                status="completed",
-                metrics={"test": metrics},
-                run_kind="smoke",
-                eligible_for_confirmatory_report=False,
-                exclusion_reasons=["test run"],
-                protocol_commit=resolve_protocol_commit(_root()),
-                protocol_sha256=protocol_sha256(_root()),
-                configured_max_epochs=50,
-                actual_epochs_completed=1,
-                best_epoch=None,
-                termination_reason="not_applicable",
-                resumed=False,
-                resumed_from_run_id=None,
-                day_group=None,
-                started_utc="2026-01-01T00:00:00Z",
-                completed_utc="2026-01-01T00:01:00Z",
-                archive_sha256="c" * 64,
-                training_file_sha256="d" * 64,
-                testing_file_sha256="e" * 64,
-                parameter_count=0,
-                device="cpu",
-                environment={"python": "3.11"},
-                prediction_sha256=pred_hash,
-                prediction_path=str(pred_path),
-                checkpoint_sha256=None,
-                checkpoint_path=None,
-            )
-            schema_path = _root() / "data_contracts" / "fi2010_run_manifest.schema.json"
-            validate_run_manifest(manifest, schema_path)
-
-            manifest_path = tmp / "manifest.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
-            reloaded = json.loads(manifest_path.read_text())
-            assert reloaded["run_id"] == "test-run"
-            assert reloaded["prediction_sha256"] == pred_hash
-            assert not reloaded["eligible_for_confirmatory_report"]
-            assert reloaded["exclusion_reasons"] == ["test run"]
-
-    def test_smoke_is_excluded_from_confirmatory(self) -> None:
-        """Smoke run must have eligible_for_confirmatory_report=False."""
-        manifest = build_run_manifest(
-            run_id="smoke-test",
-            code_commit="0" * 40,
-            dirty=True,
-            model="test",
-            setup="anchored_forward",
-            fold=1,
-            horizon=10,
-            seed=1337,
-            data_fingerprint="fp",
-            configuration_hash="0" * 64,
-            configuration_path="",
-            status="completed",
-            metrics={"accuracy": 0.5},
-            run_kind="smoke",
-            eligible_for_confirmatory_report=False,
-            exclusion_reasons=["git tree is dirty"],
-            protocol_commit="",
-            protocol_sha256="",
-            termination_reason="not_applicable",
-            resumed=False,
-            archive_sha256="c" * 64,
-            training_file_sha256="d" * 64,
-            testing_file_sha256="e" * 64,
-            parameter_count=0,
-            started_utc="2026-01-01T00:00:00Z",
-            completed_utc="2026-01-01T00:01:00Z",
-            device="cpu",
-            environment={"python": "3.11"},
-        )
-        assert manifest["run_kind"] == "smoke"
-        assert not manifest["eligible_for_confirmatory_report"]
-        assert len(manifest["exclusion_reasons"]) == 1
+            assert float(direct[key]) == pytest.approx(float(from_artifact[key]), rel=1e-10)
+        assert direct["confusion_matrix"] == from_artifact["confusion_matrix"]
