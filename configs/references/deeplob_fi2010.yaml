@@ -1,0 +1,46 @@
+schema_version: 1
+paper:
+  title: "DeepLOB: Deep Convolutional Neural Networks for Limit Order Books"
+  arxiv_revision: 1808.03668v6
+  url: https://arxiv.org/abs/1808.03668
+  access_date: 2026-07-31
+  authors: [Zihao Zhang, Stefan Zohren, Stephen Roberts]
+  reported_metric_note: The paper tables report Accuracy, Precision, Recall, and F1 percentages; the table text does not fully specify class averaging or probability calibration.
+  acceptance:
+    macro_f1_absolute_tolerance: 0.05
+    require_no_total_class_collapse: true
+    require_expected_horizon_behavior: true
+repository:
+  url: https://github.com/zcakhaa/DeepLOB-Deep-Convolutional-Neural-Networks-for-Limit-Order-Books
+  branch: master
+  commit: ff14d7c2fd38bdfc143389786993d0f0236d4eb8
+  pytorch_notebook_blob: 0fd2f77c7656f83580a3b159408d41d5f9e43d32
+  access_date: 2026-07-31
+reported_values:
+  setup_1:
+    source_table: Table I
+    aggregation: nine anchored day folds; paper table reports a combined value by horizon
+    feature_representation: first 40 raw LOB rows
+    sequence_length: 100
+    values:
+      - {model: DeepLOB, horizon: 10, accuracy_percent: 78.91, precision_percent: 78.47, recall_percent: 78.91, f1_percent: 77.66}
+      - {model: DeepLOB, horizon: 50, accuracy_percent: 75.01, precision_percent: 75.10, recall_percent: 75.01, f1_percent: 74.96}
+      - {model: DeepLOB, horizon: 100, accuracy_percent: 76.66, precision_percent: 76.77, recall_percent: 76.66, f1_percent: 76.58}
+  setup_2:
+    source_table: Table II
+    aggregation: first seven days training and final three days testing; paper table reports a combined value by horizon
+    feature_representation: first 40 raw LOB rows
+    sequence_length: 100
+    values:
+      - {model: DeepLOB, horizon: 10, accuracy_percent: 84.47, precision_percent: 84.00, recall_percent: 84.47, f1_percent: 83.40}
+      - {model: DeepLOB, horizon: 20, accuracy_percent: 74.85, precision_percent: 74.06, recall_percent: 74.85, f1_percent: 72.82}
+      - {model: DeepLOB, horizon: 50, accuracy_percent: 80.51, precision_percent: 80.38, recall_percent: 80.51, f1_percent: 80.35}
+  unavailable_in_source_tables:
+    setup_1_horizons: [20, 30]
+    setup_2_horizons: [30, 100]
+parameter_reference:
+  source_table: Table III
+  model: DeepLOB
+  forward_milliseconds: 0.253
+  parameters_approximate: 60000
+  note: The paper value is approximate and corresponds to its Keras implementation; the official PyTorch notebook architecture has a separately verified trainable parameter count.

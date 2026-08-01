@@ -20,7 +20,17 @@ PROHIBITED_IMPORT_PATTERN = (
     r"|from (scipy|sklearn|torch|pandas|gymnasium|stable_baselines3)"
 )
 NUMPY_IMPORT_PATTERN = r"(?:import numpy|from numpy)"
-_ALLOWED_NUMPY_PREFIX = "src/deepbook/data/fi2010/"
+_ALLOWED_SCIENTIFIC_PREFIXES = (
+    "src/deepbook/models/",
+    "src/deepbook/training/",
+    "src/deepbook/evaluation/",
+    "src/deepbook/cli/",
+    "tests/",
+)
+_ALLOWED_NUMPY_PREFIXES = (
+    "src/deepbook/data/fi2010/",
+    *_ALLOWED_SCIENTIFIC_PREFIXES,
+)
 TEMPORARY_DOWNLOAD_URL_PATTERN = re.compile(
     r"https://download\.fairdata\.fi(?::[0-9]+)?/[^\s\"']*\?[^\s\"']+",
     re.IGNORECASE,
@@ -50,11 +60,11 @@ _BINARY_SUFFIXES = {".ckpt", ".jpg", ".lock", ".png", ".pt", ".pth"}
 def find_scientific_import_violations(relative_path: str, text: str) -> list[str]:
     """Return import-policy findings for one tracked Python source file."""
     violations: list[str] = []
-    if re.search(PROHIBITED_IMPORT_PATTERN, text):
+    approved_scientific_path = relative_path.startswith(_ALLOWED_SCIENTIFIC_PREFIXES)
+    if re.search(PROHIBITED_IMPORT_PATTERN, text) and not approved_scientific_path:
         violations.append("prohibited scientific import")
-    if re.search(NUMPY_IMPORT_PATTERN, text) and not relative_path.startswith(
-        _ALLOWED_NUMPY_PREFIX
-    ):
+    approved_numpy_path = relative_path.startswith(_ALLOWED_NUMPY_PREFIXES)
+    if re.search(NUMPY_IMPORT_PATTERN, text) and not approved_numpy_path:
         violations.append("NumPy import outside FI-2010 data code")
     return violations
 
@@ -148,6 +158,10 @@ def check_repository(root: Path) -> list[str]:
     for relative_path in tracked:
         if relative_path.startswith(("data/raw/fi2010/", "data/interim/fi2010/")):
             violations.append(f"raw or generated FI-2010 data is tracked: {relative_path}")
+        if relative_path.startswith("artifacts/fi2010/baselines/"):
+            violations.append(f"baseline artifact is tracked: {relative_path}")
+        if relative_path.endswith((".pt", ".pth", ".ckpt")):
+            violations.append(f"checkpoint/model weight file is tracked: {relative_path}")
         text = _read_tracked_text(root, relative_path)
         if text is None:
             continue

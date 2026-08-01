@@ -1,0 +1,34 @@
+schema_version: 1
+experiment_name: fi2010_mlplob
+source_config: configs/data/fi2010.yaml
+protocol_document: reports/protocol/fi2010_baseline_reproduction.md
+benchmark_variant: no_auction
+normalization: zscore
+input_rows: 40
+input_representation: flattened_lob_window
+sequence_length: 100
+horizons: [10, 20, 30, 50, 100]
+class_order: [up, stationary, down]
+seeds: [1337, 2027, 31415, 424242, 8675309]
+model:
+  hidden_sizes: [128, 64]
+  activation: relu
+  dropout: 0.0
+  output_logits: 3
+training:
+  loss: cross_entropy
+  optimizer: adam
+  learning_rate: 0.0001
+  batch_size: 64
+  max_epochs: 50
+  early_stopping_metric: validation_macro_f1
+  patience: 10
+  class_weights: null
+validation:
+  policy: chronological_training_only
+  purge_events: 200
+  embargo_events: 200
+outputs:
+  ignored_root: artifacts/fi2010/baselines
+  report_json: reports/results/fi2010_baseline_reproduction.json
+  report_markdown: reports/results/fi2010_baseline_reproduction.md

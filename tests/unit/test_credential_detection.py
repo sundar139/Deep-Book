@@ -111,15 +111,20 @@ def test_temporary_fairdata_url_is_detected_without_storing_a_token() -> None:
     assert TEMPORARY_DOWNLOAD_URL_PATTERN.search(runtime_url)
 
 
-def test_numpy_is_allowed_only_in_fi2010_data_package() -> None:
+def test_numpy_is_allowed_in_modeling_paths() -> None:
     statement = "import " + "numpy as np"
     assert find_scientific_import_violations("src/deepbook/data/fi2010/dataset.py", statement) == []
+    assert find_scientific_import_violations("src/deepbook/models/classical.py", statement) == []
     assert find_scientific_import_violations("src/deepbook/model.py", statement) == [
         "NumPy import outside FI-2010 data code"
     ]
 
 
-def test_modeling_scientific_import_remains_prohibited() -> None:
+def test_modeling_scientific_import_is_allowed_only_in_approved_paths() -> None:
+    assert (
+        find_scientific_import_violations("src/deepbook/models/classical.py", "import " + "sklearn")
+        == []
+    )
     assert find_scientific_import_violations(
         "src/deepbook/data/fi2010/dataset.py", "import " + "sklearn"
     ) == ["prohibited scientific import"]

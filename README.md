@@ -49,7 +49,7 @@ python -m venv .venv
 
 # Editable install with dev dependencies
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,data]"
+python -m pip install -e ".[dev,data,model]"
 
 # Verify
 python -m deepbook.cli.doctor
@@ -138,7 +138,11 @@ license, layout, safeguards, output paths, and known metadata limitations.
 
 ## Current Status
 
-Repository foundation and the authoritative FI-2010 acquisition/audit pipeline are in
-place. The pipeline verifies source bytes, extracts safely, preserves supplied labels,
-and generates deterministic provenance and split manifests. No modeling or execution
-simulation has been implemented.
+Repository foundation, the authoritative FI-2010 acquisition/audit pipeline, and the
+ordered FI-2010 baseline runner are in place. The runner preserves supplied labels,
+uses chronological training-only selection with purge/embargo, records auditable
+manifests, and implements majority, causal persistence, multinomial logistic,
+RandomForest, MLP-LOB, and the reference-controlled DeepLOB comparator. Results are
+local reproductions, not publisher-verified benchmark values. No prohibited market
+data collection, Hawkes feature extraction, execution simulation, reinforcement
+learning, TransLOB, or TLOB implementation is included.

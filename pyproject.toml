@@ -37,6 +37,10 @@ data = [
     "numpy>=1.26,<3",
     "pyyaml>=6.0",
 ]
+model = [
+    "scikit-learn>=1.9,<2",
+    "torch>=2.13,<2.14",
+]
 
 [project.urls]
 Repository = "https://github.com/deepbook-research/deepbook"
@@ -71,12 +75,17 @@ ignore = [
 "scripts/check_repository_policy.py" = ["T201", "D103"]
 "src/deepbook/cli/doctor.py" = ["T201"]
 "src/deepbook/data/fi2010/cli.py" = ["T201"]
+"src/deepbook/training/runner.py" = ["T201"]
 "src/deepbook/repository_policy.py" = ["T201"]
 "tests/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "N803", "D102", "D401"]
 "tests/conftest.py" = ["PT022", "D401"]
 "tests/property/*" = ["D103", "D205", "D209", "D212", "D413", "D416", "D417", "N806", "PT006", "PT011", "PT018", "F401", "S101", "SIM102"]
 "tests/smoke/*" = ["D103", "S101"]
 "tests/unit/*" = ["D103", "S101", "F401", "F841", "SIM102", "UP017"]
+"tests/integration/*" = ["D103", "S101"]
+"tests/regression/*" = ["D103", "S101"]
+"tests/gpu/*" = ["D103", "S101"]
+"src/deepbook/cli/fi2010_baselines.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["deepbook"]
@@ -105,6 +114,7 @@ addopts = "-q --strict-markers --durations=10"
 markers = [
     "fast: pure-function / contract tests, run on every commit",
     "data: requires real downloaded data on disk, skipped in CI by design",
+    "gpu: requires CUDA-capable GPU; skips when unavailable",
 ]
 filterwarnings = [
     "error::RuntimeWarning",

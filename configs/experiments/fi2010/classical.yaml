@@ -1,0 +1,50 @@
+schema_version: 1
+experiment_name: fi2010_classical_baselines
+source_config: configs/data/fi2010.yaml
+protocol_document: reports/protocol/fi2010_baseline_reproduction.md
+benchmark_variant: no_auction
+normalization: zscore
+sequence_length: 100
+horizons: [10, 20, 30, 50, 100]
+class_order: [up, stationary, down]
+source_labels: {1: up, 2: stationary, 3: down}
+seeds: [1337, 2027, 31415, 424242, 8675309]
+setups:
+  anchored_forward:
+    folds: 9
+    train_days: cumulative
+    test_day: fold_plus_one
+  first_seven_final_three:
+    train_days: [1, 2, 3, 4, 5, 6, 7]
+    test_days: [8, 9, 10]
+validation:
+  policy: chronological_training_only
+  validation_days: final_complete_training_day
+  single_day_fraction: 0.2
+  purge_events: 200
+  embargo_events: 200
+models:
+  majority:
+    smoothing: 0.000001
+  causal_persistence:
+    lag_policy: horizon_events
+  logistic_current_event:
+    features: supplied_non_label_144
+    solver: lbfgs
+    c: 1.0
+    max_iter: 200
+    random_state: 1337
+  random_forest:
+    features: supplied_non_label_144
+    n_estimators: 200
+    max_depth: 18
+    min_samples_leaf: 2
+    max_features: sqrt
+    max_training_rows: 100000
+  metrics:
+    ece_bins: 10
+    probability_clip: 1.0e-15
+outputs:
+  ignored_root: artifacts/fi2010/baselines
+  report_json: reports/results/fi2010_baseline_reproduction.json
+  report_markdown: reports/results/fi2010_baseline_reproduction.md
