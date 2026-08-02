@@ -1493,7 +1493,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.model is None:
         parser.error("--model is required unless --report-only is supplied")
     failures = 0
+    artifact_root = default_artifact_root(root)
     for spec in _selected_specs(args, root):
+        manifest_path = run_paths(artifact_root).runs / f"{spec.run_id}.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("status") == "completed":
+                print(f"Skipping (already completed): {spec.run_id}")
+                continue
         try:
             manifest = execute_run(
                 root,
