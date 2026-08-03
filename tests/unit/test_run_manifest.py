@@ -51,6 +51,8 @@ def _minimal_valid_manifest(root: Path) -> dict:
         exclusion_reasons=["test"],
         protocol_commit=_protocol_commit(root),
         protocol_sha256=protocol_sha256(root),
+        code_commit_timestamp="2026-01-01T00:00:00+00:00",
+        code_commit_tree="1" * 40,
         configured_max_epochs=None,
         actual_epochs_completed=None,
         best_epoch=None,

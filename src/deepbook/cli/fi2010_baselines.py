@@ -22,6 +22,7 @@ from deepbook.evaluation.prediction import load_prediction_artifact, sha256_file
 from deepbook.training.fi2010 import (
     FROZEN_DATA_IDENTITY_PATH,
     check_protocol_ancestry,
+    code_commit_provenance_reasons,
     configuration_hash,
     expected_archive_sha256,
     expected_data_fingerprint,
@@ -97,9 +98,13 @@ def _fail(msg: str) -> int:
     return 1
 
 
-def _cmd_verify_run(root: Path, run_id: str) -> int:
+def _cmd_verify_run(root: Path, run_id: str, artifact_root: Path | None = None) -> int:
     """Comprehensively verify a run manifest against its artifacts and protocol."""
-    manifest_path = root / "artifacts" / "fi2010" / "baselines" / "runs" / f"{run_id}.json"
+    manifest_path = (
+        (artifact_root or (root / "artifacts" / "fi2010" / "baselines"))
+        / "runs"
+        / (f"{run_id}.json")
+    )
     if not manifest_path.is_file():
         return _fail(f"run manifest not found: {manifest_path}")
 
@@ -111,6 +116,16 @@ def _cmd_verify_run(root: Path, run_id: str) -> int:
         validate_run_manifest(manifest, schema_path)
     except Exception as exc:
         return _fail(f"schema validation failed: {exc}")
+
+    if manifest.get("status") != "completed":
+        return _fail(f"run status is not completed: {manifest.get('status')!r}")
+
+    # Commit existence, ancestry, tree identity, and execution-time ordering are
+    # checked independently of the manifest's self-declared eligibility.
+    code_reasons = code_commit_provenance_reasons(root, manifest)
+    if code_reasons:
+        return _fail("; ".join(code_reasons))
+    print(f"Code commit provenance verified: {manifest['code_commit'][:12]}...")
 
     # 2. Reject empty metrics
     metrics_block = manifest.get("metrics", {})

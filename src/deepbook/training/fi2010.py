@@ -9,6 +9,7 @@ import random
 import subprocess
 from bisect import bisect_right
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ FROZEN_DATA_IDENTITY_PATH = "configs/references/fi2010_frozen_data_identity.yaml
 DAY_GROUP_FIRST_SEVEN_FINAL_THREE = "days_8_9_10"
 SETUP_ANCHORED_FORWARD = "anchored_forward"
 SETUP_FIRST_SEVEN_FINAL_THREE = "first_seven_final_three"
+GIT_CLOCK_SKEW_TOLERANCE_SECONDS = 300
 
 
 def resolve_protocol_commit(root: Path) -> str:
@@ -75,6 +77,85 @@ def check_protocol_ancestry(root: Path, protocol_commit: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def git_commit_timestamp(root: Path, commit: str) -> str | None:
+    """Return a commit's committer timestamp, or ``None`` when it is unknown."""
+    result = subprocess.run(
+        ["git", "show", "-s", "--format=%cI", commit],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.strip()
+
+
+def git_commit_tree(root: Path, commit: str) -> str | None:
+    """Return the tree object recorded by a commit, or ``None`` when unknown."""
+    result = subprocess.run(
+        ["git", "rev-parse", f"{commit}^{{tree}}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.strip()
+
+
+def check_code_commit_ancestry(root: Path, code_commit: str) -> bool:
+    """Return True only when the recorded code commit is in current HEAD ancestry."""
+    if not code_commit or len(code_commit) != 40:
+        return False
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", code_commit, "HEAD"],
+        cwd=root,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _parse_utc(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def code_commit_provenance_reasons(
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    tolerance_seconds: int = GIT_CLOCK_SKEW_TOLERANCE_SECONDS,
+) -> list[str]:
+    """Return temporal, ancestry, and tree-integrity failures for a run manifest."""
+    reasons: list[str] = []
+    commit = str(manifest.get("code_commit", ""))
+    actual_timestamp = git_commit_timestamp(root, commit)
+    actual_tree = git_commit_tree(root, commit)
+    if actual_timestamp is None or actual_tree is None:
+        reasons.append("recorded code commit is unknown")
+        return reasons
+    if not check_code_commit_ancestry(root, commit):
+        reasons.append("recorded code commit is not in current repository ancestry")
+    recorded_timestamp = str(manifest.get("code_commit_timestamp", ""))
+    if recorded_timestamp != actual_timestamp:
+        reasons.append("recorded code commit timestamp does not match the repository")
+    if str(manifest.get("code_commit_tree", "")) != actual_tree:
+        reasons.append("recorded Git tree hash does not match the code commit")
+    started = _parse_utc(str(manifest.get("started_utc", "")))
+    completed = _parse_utc(str(manifest.get("completed_utc", "")))
+    commit_time = _parse_utc(actual_timestamp)
+    if started is None or completed is None or commit_time is None:
+        reasons.append("run timestamps or code commit timestamp are invalid")
+    else:
+        tolerance = timedelta(seconds=tolerance_seconds)
+        if commit_time > started + tolerance or commit_time > completed + tolerance:
+            reasons.append("recorded code commit did not exist when this run executed")
+    return reasons
 
 
 def configuration_hash(configuration: Any) -> str:

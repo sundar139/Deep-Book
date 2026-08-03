@@ -18,6 +18,8 @@
     "protocol_commit",
     "protocol_sha256",
     "code_commit",
+    "code_commit_timestamp",
+    "code_commit_tree",
     "git_tree_dirty",
     "configuration_path",
     "configuration_hash",
@@ -67,6 +69,14 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "code_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "code_commit_timestamp": {
+      "type": "string",
+      "minLength": 1
+    },
+    "code_commit_tree": {
       "type": "string",
       "pattern": "^[0-9a-f]{40}$"
     },

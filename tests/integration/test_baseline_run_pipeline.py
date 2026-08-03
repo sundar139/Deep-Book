@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from deepbook.cli.fi2010_baselines import _cmd_prepare, _cmd_report, _cmd_verify_run
 from deepbook.evaluation.classification import classification_metrics
@@ -27,17 +28,23 @@ from deepbook.training.fi2010 import (
     DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
     SETUP_ANCHORED_FORWARD,
     SETUP_FIRST_SEVEN_FINAL_THREE,
+    code_commit_provenance_reasons,
+    configuration_hash,
     expected_archive_sha256,
     expected_data_fingerprint,
     frozen_data_identity,
+    protocol_sha256,
     validate_run_manifest,
 )
 from deepbook.training.runner import (
     RunData,
     RunSpec,
     SourceSegment,
+    _record_run,
+    completed_run_skip_reasons,
     execute_run,
     generate_run_index,
+    reconcile_interrupted_artifacts,
     run_paths,
     write_report,
     write_run_index,
@@ -407,6 +414,137 @@ class TestProductionOrchestration:
         )
         assert manifest["eligible_for_confirmatory_report"] is False
         assert "git tree is dirty" in manifest["exclusion_reasons"]
+
+    def test_confirmatory_matrix_refuses_dirty_tree_before_provider(
+        self, synthetic_root: Path
+    ) -> None:
+        (synthetic_root / "untracked.txt").write_text("dirty", encoding="utf-8")
+        called = False
+
+        def provider(*_args: object) -> RunData:
+            nonlocal called
+            called = True
+            raise AssertionError("dirty confirmatory matrix must not load data")
+
+        with pytest.raises(RuntimeError, match="dirty Git tree.*untracked.txt"):
+            execute_run(
+                synthetic_root,
+                _classical_spec(),
+                artifact_root=synthetic_root / "artifacts" / "fi2010" / "baselines",
+                run_data_provider=provider,
+                confirmatory_matrix=True,
+            )
+        assert not called
+
+    def test_completed_manifest_cannot_be_rewritten(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        manifest = execute_run(
+            synthetic_root,
+            _classical_spec(),
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        manifest_path = run_paths(artifacts).runs / f"{manifest['run_id']}.json"
+        original = manifest_path.read_bytes()
+        with pytest.raises(ValueError, match="completed manifest is immutable"):
+            _record_run(synthetic_root, artifacts, manifest)
+        assert manifest_path.read_bytes() == original
+
+    def test_completed_skip_requires_verified_confirmatory_provenance(
+        self, synthetic_root: Path
+    ) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        manifest = execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        assert (
+            completed_run_skip_reasons(synthetic_root, spec, manifest, artifact_root=artifacts)
+            == []
+        )
+        for changed, fragment in (
+            ({"run_kind": "smoke", "eligible_for_confirmatory_report": False}, "run_kind"),
+            ({"code_commit": "0" * 40}, "code commit"),
+            ({"configuration_hash": "a" * 64}, "configuration"),
+            ({"protocol_sha256": "b" * 64}, "protocol SHA-256"),
+            ({"prediction_path": str(artifacts / "predictions" / "missing.npz")}, "prediction"),
+        ):
+            reasons = completed_run_skip_reasons(
+                synthetic_root, spec, {**manifest, **changed}, artifact_root=artifacts
+            )
+            assert any(fragment in reason for reason in reasons), reasons
+
+    def test_temporal_provenance_rejects_posthoc_commit_claim(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        manifest = execute_run(
+            synthetic_root,
+            _classical_spec(),
+            artifact_root=artifacts,
+            run_data_provider=_provider(synthetic_root),
+        )
+        forged = {
+            **manifest,
+            "started_utc": "2000-01-01T00:00:00+00:00",
+            "completed_utc": "2000-01-01T00:01:00+00:00",
+        }
+        reasons = code_commit_provenance_reasons(synthetic_root, forged)
+        assert "recorded code commit did not exist when this run executed" in reasons
+
+    def test_run_index_records_running_transition_before_data_load(
+        self, synthetic_root: Path
+    ) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        spec = _classical_spec()
+        provider = _provider(synthetic_root)
+
+        def observing_provider(root: Path, requested: RunSpec, config_path: str) -> RunData:
+            index = json.loads((artifacts / "run_index.json").read_text(encoding="utf-8"))
+            assert index["running"] == [spec.run_id]
+            return provider(root, requested, config_path)
+
+        execute_run(
+            synthetic_root,
+            spec,
+            artifact_root=artifacts,
+            run_data_provider=observing_provider,
+        )
+
+    def test_orphan_last_checkpoint_is_recoverable(self, synthetic_root: Path) -> None:
+        artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
+        checkpoints = run_paths(artifacts).checkpoints
+        checkpoints.mkdir(parents=True, exist_ok=True)
+        spec = RunSpec(model="mlplob", setup=SETUP_ANCHORED_FORWARD, horizon=10, seed=1337, fold=1)
+        config = yaml.safe_load(
+            (synthetic_root / "configs" / "experiments" / "fi2010" / "mlplob.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        frozen = frozen_data_identity(synthetic_root)
+        payload = {
+            "checkpoint_kind": "last",
+            "configuration_hash": configuration_hash(config),
+            "data_fingerprint": expected_data_fingerprint(
+                synthetic_root, setup=spec.setup, fold=spec.fold
+            ),
+            "protocol_hash": protocol_sha256(synthetic_root),
+            "seed": spec.seed,
+            "next_epoch": 2,
+            "best_epoch": 1,
+            "best_validation_metric": 0.1,
+            "patience_counter": 0,
+            "best_model_state": None,
+            "archive_sha256": frozen["archive_sha256"],
+        }
+        path = checkpoints / f"{spec.run_id}.last.pt"
+        import torch
+
+        torch.save(payload, path)
+        result = reconcile_interrupted_artifacts(synthetic_root, artifacts)
+        assert result["recoverable"][spec.run_id] == str(path)
+        assert result["invalid"] == []
 
     def test_changed_frozen_data_identity_makes_a_run_ineligible(
         self, synthetic_root: Path

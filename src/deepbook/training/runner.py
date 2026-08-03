@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -42,11 +45,14 @@ from deepbook.training.fi2010 import (
     build_run_manifest,
     check_protocol_ancestry,
     chronological_training_validation_split,
+    code_commit_provenance_reasons,
     combined_testing_sha256,
     configuration_hash,
     expected_archive_sha256,
     expected_data_fingerprint,
     frozen_data_identity,
+    git_commit_timestamp,
+    git_commit_tree,
     protocol_sha256,
     report_fingerprint,
     resolve_protocol_commit,
@@ -251,16 +257,29 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return value
 
 
+def _git_dirty_paths(root: Path) -> tuple[str, ...]:
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return tuple(line for line in result.stdout.splitlines() if line)
+
+
 def _git_state(root: Path) -> tuple[str, bool]:
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
     ).stdout.strip()
-    dirty = bool(
-        subprocess.run(
-            ["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True
-        ).stdout.strip()
-    )
-    return commit, dirty
+    return commit, bool(_git_dirty_paths(root))
+
+
+def _require_clean_tree(root: Path, context: str) -> None:
+    dirty_paths = _git_dirty_paths(root)
+    if dirty_paths:
+        paths = ", ".join(line[3:] if len(line) > 3 else line for line in dirty_paths)
+        raise RuntimeError(f"confirmatory matrix refused at {context}: dirty Git tree: {paths}")
 
 
 def _device_name(device: str) -> str:
@@ -329,6 +348,7 @@ class EligibilityContext:
     configured_max_epochs: int | None
     actual_epochs_completed: int | None
     best_epoch: int | None
+    code_commit_reasons: tuple[str, ...] = ()
 
 
 def classify_run(context: EligibilityContext) -> tuple[str, bool, list[str]]:
@@ -352,6 +372,7 @@ def classify_run(context: EligibilityContext) -> tuple[str, bool, list[str]]:
         reasons.append("archive digest does not match the frozen authoritative archive")
     if not context.prediction_valid:
         reasons.append("prediction artifact is missing or invalid")
+    reasons.extend(context.code_commit_reasons)
 
     is_neural = context.model in _NEURAL_MODELS
     if is_neural:
@@ -546,10 +567,293 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _record_run(root: Path, artifact_root: Path, manifest: dict[str, Any]) -> Path:
-    validate_run_manifest(manifest, root / "data_contracts" / "fi2010_run_manifest.schema.json")
     path = run_paths(artifact_root).runs / f"{manifest['run_id']}.json"
+    if path.is_file():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        if existing.get("status") == "completed":
+            raise ValueError(
+                f"completed manifest is immutable: {path}; quarantine or explicitly invalidate "
+                "the old attempt before rerunning"
+            )
+    validate_run_manifest(manifest, root / "data_contracts" / "fi2010_run_manifest.schema.json")
     _write_json(path, manifest)
+    write_run_index(root, artifact_root)
     return path
+
+
+def _write_running_manifest(
+    root: Path,
+    artifact_root: Path,
+    spec: RunSpec,
+    config: dict[str, Any],
+    config_path: str,
+    *,
+    commit: str,
+    dirty: bool,
+    code_commit_timestamp: str,
+    code_commit_tree: str,
+    started_utc: str,
+    smoke: bool,
+    resume_from: Path | None,
+) -> None:
+    """Persist a live attempt before loading data or fitting a model."""
+    frozen = frozen_data_identity(root)
+    if spec.setup == SETUP_ANCHORED_FORWARD:
+        entry = frozen["folds"][int(spec.fold or 0)]
+        training_digest = str(entry["training_file_sha256"])
+        testing_by_day = {str(entry["testing_day_index"]): str(entry["testing_file_sha256"])}
+        archive = str(frozen["archive_sha256"])
+    else:
+        group = frozen["day_groups"][str(spec.day_group)]
+        training_digest = str(group["training_file_sha256"])
+        testing_by_day = {
+            str(day["day_index"]): str(day["file_sha256"]) for day in group["test_days"]
+        }
+        archive = str(frozen["archive_sha256"])
+    manifest = build_run_manifest(
+        run_id=spec.run_id,
+        code_commit=commit,
+        dirty=dirty,
+        model=spec.model,
+        setup=spec.setup,
+        fold=spec.fold,
+        day_group=spec.day_group,
+        horizon=spec.horizon,
+        seed=spec.seed,
+        data_fingerprint=expected_data_fingerprint(
+            root, setup=spec.setup, fold=spec.fold, day_group=spec.day_group
+        ),
+        configuration_hash=configuration_hash(config),
+        configuration_path=config_path,
+        status="running",
+        metrics={"status": "running"},
+        run_kind="smoke" if smoke else "confirmatory",
+        eligible_for_confirmatory_report=False,
+        exclusion_reasons=["run is running"],
+        protocol_commit=resolve_protocol_commit(root),
+        protocol_sha256=protocol_sha256(root),
+        code_commit_timestamp=code_commit_timestamp,
+        code_commit_tree=code_commit_tree,
+        termination_reason="not_applicable",
+        resumed=resume_from is not None,
+        resumed_from_run_id=(resume_from.stem.removesuffix(".last") if resume_from else None),
+        started_utc=started_utc,
+        completed_utc="",
+        archive_sha256=archive,
+        training_file_sha256=training_digest,
+        testing_file_sha256=(
+            next(iter(testing_by_day.values()))
+            if spec.setup == SETUP_ANCHORED_FORWARD
+            else combined_testing_sha256(testing_by_day)
+        ),
+        testing_file_sha256_by_day=testing_by_day,
+        parameter_count=None,
+        device="cpu",
+        environment=_environment(),
+        command=" ".join(sys.argv),
+        exit_code=None,
+    )
+    _record_run(root, artifact_root, manifest)
+
+
+def completed_run_skip_reasons(
+    root: Path,
+    spec: RunSpec,
+    manifest: dict[str, Any],
+    *,
+    artifact_root: Path | None = None,
+) -> list[str]:
+    """Return every reason an existing completed attempt cannot be skipped."""
+    reasons: list[str] = []
+    schema_path = root / "data_contracts" / "fi2010_run_manifest.schema.json"
+    try:
+        validate_run_manifest(manifest, schema_path)
+    except Exception as exc:
+        reasons.append(f"manifest schema is invalid: {exc}")
+        return reasons
+    expected_identity = {
+        "run_id": spec.run_id,
+        "model": spec.model,
+        "setup": spec.setup,
+        "fold": spec.fold,
+        "day_group": spec.day_group,
+        "horizon": spec.horizon,
+        "seed": spec.seed,
+    }
+    for identity_field, expected in expected_identity.items():
+        if manifest.get(identity_field) != expected:
+            reasons.append(f"{identity_field} does not match the requested matrix cell")
+    if manifest.get("status") != "completed":
+        reasons.append("status is not completed")
+    if manifest.get("run_kind") != "confirmatory":
+        reasons.append("run_kind is not confirmatory")
+    if manifest.get("eligible_for_confirmatory_report") is not True:
+        reasons.append("run is not eligible for confirmatory reporting")
+    if manifest.get("exclusion_reasons") != []:
+        reasons.append("exclusion_reasons is not empty")
+    commit, dirty = _git_state(root)
+    if dirty:
+        reasons.append("current Git tree is dirty")
+    if manifest.get("code_commit") != commit:
+        reasons.append("code commit is not the current execution commit")
+    reasons.extend(code_commit_provenance_reasons(root, manifest))
+
+    protocol_commit_value = str(manifest.get("protocol_commit", ""))
+    if not check_protocol_ancestry(root, protocol_commit_value):
+        reasons.append("protocol commit does not descend from current HEAD")
+    if manifest.get("protocol_sha256") != protocol_sha256(root):
+        reasons.append("protocol SHA-256 does not match")
+    config_name = "classical" if spec.model in CLASSICAL_MODELS else spec.model
+    config_path = root / "configs" / "experiments" / "fi2010" / f"{config_name}.yaml"
+    try:
+        if configuration_hash(_load_yaml(config_path)) != manifest.get("configuration_hash"):
+            reasons.append("configuration hash does not match")
+    except (OSError, ValueError, TypeError) as exc:
+        reasons.append(f"configuration cannot be verified: {exc}")
+    try:
+        if manifest.get("data_fingerprint") != expected_data_fingerprint(
+            root, setup=spec.setup, fold=spec.fold, day_group=spec.day_group
+        ):
+            reasons.append("frozen data fingerprint does not match")
+        if manifest.get("archive_sha256") != expected_archive_sha256(root):
+            reasons.append("archive SHA-256 does not match")
+    except (KeyError, ValueError, OSError) as exc:
+        reasons.append(f"frozen data identity cannot be verified: {exc}")
+
+    prediction_path = Path(str(manifest.get("prediction_path", "")))
+    if not _prediction_is_valid(prediction_path, manifest.get("sample_count")):
+        reasons.append("prediction artifact is missing, invalid, or has the wrong hash")
+    elif manifest.get("prediction_sha256") != sha256_file(prediction_path):
+        reasons.append("prediction SHA-256 does not match")
+    if spec.model in _NEURAL_MODELS:
+        best_path = Path(str(manifest.get("best_checkpoint_path", "")))
+        last_path = Path(str(manifest.get("last_checkpoint_path", "")))
+        if not _checkpoint_is_valid(best_path, manifest.get("best_checkpoint_sha256")):
+            reasons.append("best-model checkpoint is missing, invalid, or has the wrong hash")
+        if not _checkpoint_is_valid(last_path, manifest.get("last_checkpoint_sha256")):
+            reasons.append("last-state checkpoint is missing, invalid, or has the wrong hash")
+
+    # Use the same independent verifier as the public verify-run command.
+    from deepbook.cli.fi2010_baselines import _cmd_verify_run
+
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+        verified = _cmd_verify_run(root, spec.run_id, artifact_root)
+    if verified != 0:
+        reasons.append("verify-run failed: " + output.getvalue().strip().splitlines()[-1])
+    return reasons
+
+
+def reconcile_interrupted_artifacts(
+    root: Path, artifact_root: Path | None = None
+) -> dict[str, Any]:
+    """Find resumable last-state checkpoints and quarantine invalid orphans."""
+    artifacts = artifact_root if artifact_root is not None else default_artifact_root(root)
+    paths = run_paths(artifacts)
+    manifests = {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in paths.runs.glob("*.json")
+        if path.is_file()
+    }
+    specs = {spec.run_id: spec for spec in planned_run_specs(root)}
+    recoverable: dict[str, str] = {}
+    invalid: list[dict[str, str]] = []
+    to_quarantine: list[Path] = []
+
+    def classify(path: Path, reason: str) -> None:
+        invalid.append({"path": str(path), "reason": reason})
+        to_quarantine.append(path)
+
+    def checkpoint_matches(run_id: str, path: Path) -> tuple[bool, str]:
+        spec = specs.get(run_id)
+        if spec is None:
+            return False, "checkpoint filename is not a planned logical run identity"
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+        except Exception as exc:  # noqa: BLE001 - classify, then quarantine
+            return False, f"checkpoint cannot be loaded: {type(exc).__name__}"
+        if payload.get("checkpoint_kind") != "last":
+            return False, "checkpoint is not a last-state resume checkpoint"
+        config_name = "classical" if spec.model in CLASSICAL_MODELS else spec.model
+        config_path = root / "configs" / "experiments" / "fi2010" / f"{config_name}.yaml"
+        expected_config = configuration_hash(_load_yaml(config_path))
+        expected_data = expected_data_fingerprint(
+            root, setup=spec.setup, fold=spec.fold, day_group=spec.day_group
+        )
+        if payload.get("configuration_hash") != expected_config:
+            return False, "configuration hash mismatch"
+        if payload.get("data_fingerprint") != expected_data:
+            return False, "data fingerprint mismatch"
+        if payload.get("protocol_hash") != protocol_sha256(root):
+            return False, "protocol hash mismatch"
+        if int(payload.get("seed", -1)) != spec.seed:
+            return False, "seed mismatch"
+        return True, ""
+
+    for checkpoint in sorted(paths.checkpoints.glob("*.last.pt")):
+        run_id = checkpoint.name.removesuffix(".last.pt")
+        manifest = manifests.get(run_id)
+        if manifest is not None and manifest.get("status") == "completed":
+            continue
+        try:
+            valid, reason = checkpoint_matches(run_id, checkpoint)
+        except Exception as exc:  # noqa: BLE001 - quarantine malformed orphan
+            valid, reason = False, f"checkpoint metadata could not be checked: {type(exc).__name__}"
+        if valid:
+            recoverable[run_id] = str(checkpoint)
+        else:
+            classify(checkpoint, reason)
+
+    claimed_checkpoints = {
+        str(Path(str(manifest.get("best_checkpoint_path", ""))).resolve())
+        for manifest in manifests.values()
+    } | {
+        str(Path(str(manifest.get("last_checkpoint_path", ""))).resolve())
+        for manifest in manifests.values()
+    }
+    for checkpoint in sorted(paths.checkpoints.glob("*.pt")):
+        if checkpoint.name.endswith(".last.pt"):
+            continue
+        if str(checkpoint.resolve()) not in claimed_checkpoints:
+            classify(checkpoint, "checkpoint has no manifest")
+
+    claimed_predictions = {
+        str(Path(str(manifest.get("prediction_path", ""))).resolve())
+        for manifest in manifests.values()
+    }
+    for prediction in sorted(paths.predictions.glob("*.npz")):
+        if str(prediction.resolve()) not in claimed_predictions:
+            classify(prediction, "prediction artifact has no manifest")
+
+    for path in sorted(artifacts.rglob("*")):
+        if path.is_file() and (path.name.endswith(".tmp") or ".tmp." in path.name):
+            classify(path, "stale temporary artifact")
+
+    for run_id, manifest in manifests.items():
+        if manifest.get("status") == "running" and run_id not in recoverable:
+            run_path = paths.runs / f"{run_id}.json"
+            classify(run_path, "running manifest has no valid recoverable last checkpoint")
+
+    quarantine_dir: Path | None = None
+    mapping: list[dict[str, str]] = []
+    if to_quarantine:
+        quarantine_dir = artifacts / "quarantine" / f"reconciliation-{_utc_now().replace(':', '')}"
+        for path in sorted(set(to_quarantine)):
+            if not path.exists():
+                continue
+            destination = quarantine_dir / path.relative_to(artifacts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(path), str(destination))
+            mapping.append({"source": str(path), "destination": str(destination)})
+        _write_json(
+            quarantine_dir / "reconciliation.json",
+            {"invalid": invalid, "moved": mapping},
+        )
+    return {
+        "recoverable": dict(sorted(recoverable.items())),
+        "invalid": invalid,
+        "quarantine": str(quarantine_dir) if quarantine_dir else None,
+    }
 
 
 def execute_run(
@@ -562,6 +866,7 @@ def execute_run(
     smoke: bool = False,
     resume_from: Path | None = None,
     run_data_provider: RunDataProvider | None = None,
+    confirmatory_matrix: bool = False,
 ) -> dict[str, Any]:
     """Execute one matrix cell end to end and return its validated manifest.
 
@@ -571,6 +876,11 @@ def execute_run(
     """
     artifacts = artifact_root if artifact_root is not None else default_artifact_root(root)
     paths = run_paths(artifacts)
+    if confirmatory_matrix:
+        _require_clean_tree(root, "matrix startup/before run")
+    commit, dirty_at_start = _git_state(root)
+    code_commit_timestamp = git_commit_timestamp(root, commit) or ""
+    code_commit_tree = git_commit_tree(root, commit) or ""
     provider = run_data_provider if run_data_provider is not None else build_run_data
     config_name = "classical" if spec.model in CLASSICAL_MODELS else spec.model
     config_path = f"configs/experiments/fi2010/{config_name}.yaml"
@@ -578,6 +888,20 @@ def execute_run(
     started_utc = _utc_now()
     started = time.perf_counter()
     protocol_hash_at_start = protocol_sha256(root)
+    _write_running_manifest(
+        root,
+        artifacts,
+        spec,
+        config,
+        config_path,
+        commit=commit,
+        dirty=dirty_at_start,
+        code_commit_timestamp=code_commit_timestamp,
+        code_commit_tree=code_commit_tree,
+        started_utc=started_utc,
+        smoke=smoke,
+        resume_from=resume_from,
+    )
 
     data = provider(root, spec, config_path)
     horizon_index = HORIZONS.index(spec.horizon)
@@ -629,13 +953,27 @@ def execute_run(
         else None
     )
 
-    commit, dirty = _git_state(root)
+    end_commit, dirty_at_end = _git_state(root)
+    completed_utc = _utc_now()
+    dirty = dirty_at_start or dirty_at_end
     protocol_commit_value = resolve_protocol_commit(root)
     protocol_hash = protocol_sha256(root)
     configuration_digest = configuration_hash(config)
     expected_fingerprint = expected_data_fingerprint(
         root, setup=spec.setup, fold=spec.fold, day_group=spec.day_group
     )
+    code_reasons = code_commit_provenance_reasons(
+        root,
+        {
+            "code_commit": commit,
+            "code_commit_timestamp": code_commit_timestamp,
+            "code_commit_tree": code_commit_tree,
+            "started_utc": started_utc,
+            "completed_utc": completed_utc,
+        },
+    )
+    if end_commit != commit:
+        code_reasons.append("code commit changed while the run was executing")
     context = EligibilityContext(
         model=spec.model,
         status="completed",
@@ -660,6 +998,7 @@ def execute_run(
         configured_max_epochs=outcome.get("configured_max_epochs"),
         actual_epochs_completed=outcome.get("actual_epochs_completed"),
         best_epoch=outcome.get("best_epoch"),
+        code_commit_reasons=tuple(code_reasons),
     )
     run_kind, eligible, reasons = classify_run(context)
 
@@ -683,6 +1022,8 @@ def execute_run(
         exclusion_reasons=reasons,
         protocol_commit=protocol_commit_value,
         protocol_sha256=protocol_hash,
+        code_commit_timestamp=code_commit_timestamp,
+        code_commit_tree=code_commit_tree,
         configured_max_epochs=outcome.get("configured_max_epochs"),
         actual_epochs_completed=outcome.get("actual_epochs_completed"),
         best_epoch=outcome.get("best_epoch"),
@@ -690,7 +1031,7 @@ def execute_run(
         resumed=resume_from is not None,
         resumed_from_run_id=str(resume_from) if resume_from is not None else None,
         started_utc=started_utc,
-        completed_utc=_utc_now(),
+        completed_utc=completed_utc,
         archive_sha256=data.archive_sha256,
         training_file_sha256=data.training_file_sha256,
         testing_file_sha256=data.testing_file_sha256,
@@ -733,6 +1074,8 @@ def failed_run_manifest(root: Path, spec: RunSpec, error: BaseException) -> dict
     config_path = f"configs/experiments/fi2010/{config_name}.yaml"
     config = _load_yaml(root / config_path)
     commit, dirty = _git_state(root)
+    code_commit_timestamp = git_commit_timestamp(root, commit) or ""
+    code_commit_tree = git_commit_tree(root, commit) or ""
     if spec.setup == SETUP_ANCHORED_FORWARD:
         entry = frozen["folds"][int(spec.fold or 0)]
         training_digest = str(entry["training_file_sha256"])
@@ -766,6 +1109,8 @@ def failed_run_manifest(root: Path, spec: RunSpec, error: BaseException) -> dict
         exclusion_reasons=["run status is failed, not completed"],
         protocol_commit=resolve_protocol_commit(root),
         protocol_sha256=protocol_sha256(root),
+        code_commit_timestamp=code_commit_timestamp,
+        code_commit_tree=code_commit_tree,
         termination_reason="failed",
         resumed=False,
         started_utc=now,
@@ -1082,17 +1427,28 @@ def generate_run_index(root: Path, artifact_root: Path | None = None) -> dict[st
     completed_smoke: list[str] = []
     failed: list[str] = []
     interrupted: list[str] = []
+    running: list[str] = []
+    excluded: list[str] = []
     for run_id, manifest in sorted(manifests_by_id.items()):
         status = manifest.get("status", "")
         if status == "completed":
-            if manifest.get("eligible_for_confirmatory_report") and run_id not in conflicted_ids:
+            if (
+                manifest.get("run_kind") == "confirmatory"
+                and manifest.get("eligible_for_confirmatory_report") is True
+                and manifest.get("exclusion_reasons") == []
+                and manifest.get("git_tree_dirty") is False
+                and run_id not in conflicted_ids
+            ):
                 completed_confirmatory.append(run_id)
             else:
                 completed_smoke.append(run_id)
+                excluded.append(run_id)
         elif status == "failed":
             failed.append(run_id)
         elif status == "interrupted":
             interrupted.append(run_id)
+        elif status == "running":
+            running.append(run_id)
 
     totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for spec in specs:
@@ -1133,6 +1489,8 @@ def generate_run_index(root: Path, artifact_root: Path | None = None) -> dict[st
             "protocol_commit": manifest.get("protocol_commit"),
             "protocol_sha256": manifest.get("protocol_sha256"),
             "code_commit": manifest.get("code_commit"),
+            "code_commit_timestamp": manifest.get("code_commit_timestamp"),
+            "code_commit_tree": manifest.get("code_commit_tree"),
             "git_tree_dirty": manifest.get("git_tree_dirty", manifest.get("dirty", False)),
             "configuration_hash": manifest.get("configuration_hash", ""),
             "data_fingerprint": manifest.get("data_fingerprint", ""),
@@ -1166,6 +1524,9 @@ def generate_run_index(root: Path, artifact_root: Path | None = None) -> dict[st
         },
         "completed_confirmatory": sorted(completed_confirmatory),
         "completed_smoke": sorted(completed_smoke),
+        "excluded": sorted(excluded),
+        "running": sorted(running),
+        "planned": sorted(set(planned_cells) - set(manifests_by_id)),
         "failed": sorted(failed),
         "interrupted": sorted(interrupted),
         "missing_manifests": sorted(set(planned_cells) - set(manifests_by_id)),
@@ -1492,25 +1853,74 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.model is None:
         parser.error("--model is required unless --report-only is supplied")
+    confirmatory_matrix = bool(args.matrix and not args.smoke)
+    if confirmatory_matrix:
+        try:
+            _require_clean_tree(root, "matrix startup")
+        except RuntimeError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 2
     failures = 0
     artifact_root = default_artifact_root(root)
+    reconciliation = reconcile_interrupted_artifacts(root, artifact_root)
+    for run_id, checkpoint in reconciliation["recoverable"].items():
+        print(f"Recovering interrupted run: {run_id} from {checkpoint}")
+    for item in reconciliation["invalid"]:
+        print(f"Quarantined invalid orphan: {item['path']} ({item['reason']})")
+    write_run_index(root, artifact_root)
     for spec in _selected_specs(args, root):
+        if confirmatory_matrix:
+            try:
+                _require_clean_tree(root, f"before run {spec.run_id}")
+            except RuntimeError as error:
+                print(f"ERROR: {error}", file=sys.stderr)
+                return 2
         manifest_path = run_paths(artifact_root).runs / f"{spec.run_id}.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if manifest.get("status") == "completed":
-                print(f"Skipping (already completed): {spec.run_id}")
-                continue
+                reasons = completed_run_skip_reasons(
+                    root, spec, manifest, artifact_root=artifact_root
+                )
+                if not reasons:
+                    print(f"Skipping (verified completed): {spec.run_id}")
+                    write_run_index(root, artifact_root)
+                    continue
+                print(
+                    f"ERROR: existing completed manifest is not skippable for {spec.run_id}; "
+                    "quarantine or explicitly invalidate it before rerunning:\n  - "
+                    + "\n  - ".join(reasons),
+                    file=sys.stderr,
+                )
+                return 2
         try:
+            resume_from = (
+                Path(args.resume_from)
+                if args.resume_from
+                else (
+                    Path(reconciliation["recoverable"][spec.run_id])
+                    if spec.run_id in reconciliation["recoverable"]
+                    else None
+                )
+            )
             manifest = execute_run(
                 root,
                 spec,
+                artifact_root=artifact_root,
                 device=args.device,
                 max_epochs=args.max_epochs,
                 smoke=args.smoke,
-                resume_from=Path(args.resume_from) if args.resume_from else None,
+                resume_from=resume_from,
+                confirmatory_matrix=confirmatory_matrix,
             )
         except Exception as error:  # noqa: BLE001 - failures are recorded, not raised
+            if (
+                confirmatory_matrix
+                and isinstance(error, RuntimeError)
+                and str(error).startswith("confirmatory matrix refused")
+            ):
+                print(f"ERROR {spec.run_id}: {error}", file=sys.stderr)
+                return 2
             failures += 1
             print(f"ERROR {spec.run_id}: {type(error).__name__}: {error}", file=sys.stderr)
             try:
@@ -1524,6 +1934,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
             continue
         print(f"Run {manifest['status']}: {spec.run_id}")
+        if confirmatory_matrix and not manifest.get("eligible_for_confirmatory_report"):
+            print(
+                f"ERROR: matrix stopped after ineligible run {spec.run_id}: "
+                + "; ".join(manifest.get("exclusion_reasons", [])),
+                file=sys.stderr,
+            )
+            failures += 1
+            break
     print(f"Run index: {write_run_index(root)}")
     report_paths = write_report(root)
     print(f"Report JSON: {report_paths[0]}")

@@ -297,6 +297,8 @@ def _manifest(**overrides: object) -> dict:
         "protocol_commit": "0" * 40,
         "protocol_sha256": "a" * 64,
         "code_commit": "1" * 40,
+        "code_commit_timestamp": "2026-01-01T00:00:00+00:00",
+        "code_commit_tree": "2" * 40,
         "git_tree_dirty": False,
         "model": "majority",
         "setup": SETUP_FIRST_SEVEN_FINAL_THREE,
