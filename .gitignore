@@ -18,6 +18,7 @@ data/raw/
 data/interim/
 data/processed/
 reports/results/
+!reports/reproductions/
 artifacts/
 checkpoints/
 /models/

@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepbook.dev/schemas/fi2010_classical_mlplob_reproduction.schema.json",
+  "title": "FI-2010 Classical and MLP-LOB Reproduction Snapshot",
+  "description": "Deterministic tracked snapshot of the FI-2010 classical and MLP-LOB confirmatory baseline reproduction study.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "title",
+    "study_scope",
+    "provenance",
+    "coverage",
+    "status",
+    "verification",
+    "reconciliation",
+    "majority_collapse",
+    "causal_persistence_sample_counts",
+    "aggregates",
+    "environment",
+    "hashes",
+    "disclosures",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "study_scope": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_commit",
+        "protocol_commit",
+        "protocol_sha256",
+        "archive_sha256",
+        "configuration_hashes"
+      ],
+      "properties": {
+        "execution_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "protocol_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "protocol_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "archive_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "configuration_hashes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planned_total",
+        "selected_confirmatory_total",
+        "by_model",
+        "by_setup",
+        "deeplob_completed",
+        "deeplob_pending",
+        "seed_completeness"
+      ],
+      "properties": {
+        "planned_total": {
+          "type": "integer"
+        },
+        "selected_confirmatory_total": {
+          "type": "integer"
+        },
+        "by_model": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "by_setup": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "deeplob_completed": {
+          "type": "integer"
+        },
+        "deeplob_pending": {
+          "type": "integer"
+        },
+        "seed_completeness": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["planned", "completed", "complete"],
+            "properties": {
+              "planned": {"type": "integer"},
+              "completed": {"type": "integer"},
+              "complete": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "missing",
+        "failed",
+        "interrupted",
+        "running",
+        "duplicate",
+        "ineligible",
+        "orphan_predictions",
+        "orphan_checkpoints"
+      ],
+      "properties": {
+        "missing": {"type": "integer"},
+        "failed": {"type": "integer"},
+        "interrupted": {"type": "integer"},
+        "running": {"type": "integer"},
+        "duplicate": {"type": "integer"},
+        "ineligible": {"type": "integer"},
+        "orphan_predictions": {"type": "integer"},
+        "orphan_checkpoints": {"type": "integer"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_verified",
+        "metric_mismatches",
+        "prediction_mismatches",
+        "checkpoint_mismatches",
+        "provenance_mismatches"
+      ],
+      "properties": {
+        "total_verified": {"type": "integer"},
+        "metric_mismatches": {"type": "integer"},
+        "prediction_mismatches": {"type": "integer"},
+        "checkpoint_mismatches": {"type": "integer"},
+        "provenance_mismatches": {"type": "integer"}
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events", "count", "digest", "explanation"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["timestamp", "run_id", "reason", "quarantine_destination", "disposition"],
+            "properties": {
+              "timestamp": {"type": "string"},
+              "run_id": {"type": "string"},
+              "reason": {"type": "string"},
+              "quarantine_destination": {"type": "string"},
+              "disposition": {"type": "string"}
+            }
+          }
+        },
+        "count": {"type": "integer"},
+        "digest": {"type": "string"},
+        "explanation": {"type": "string"}
+      }
+    },
+    "majority_collapse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_majority_runs",
+        "single_class_runs",
+        "stationary_only",
+        "up_only",
+        "down_only",
+        "all_runs_single_class",
+        "explanation"
+      ],
+      "properties": {
+        "total_majority_runs": {"type": "integer"},
+        "single_class_runs": {"type": "integer"},
+        "stationary_only": {"type": "integer"},
+        "up_only": {"type": "integer"},
+        "down_only": {"type": "integer"},
+        "all_runs_single_class": {"type": "boolean"},
+        "explanation": {"type": "string"}
+      }
+    },
+    "causal_persistence_sample_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_causal_persistence_runs",
+        "verified_sample_count_invariant",
+        "all_verified",
+        "setup_1_segments",
+        "setup_2_segments",
+        "explanation"
+      ],
+      "properties": {
+        "total_causal_persistence_runs": {"type": "integer"},
+        "verified_sample_count_invariant": {"type": "integer"},
+        "all_verified": {"type": "boolean"},
+        "setup_1_segments": {"type": "integer"},
+        "setup_2_segments": {"type": "integer"},
+        "explanation": {"type": "string"}
+      }
+    },
+    "aggregates": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["count", "seeds"],
+        "properties": {
+          "count": {"type": "integer"},
+          "seeds": {
+            "type": "array",
+            "items": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_index_sha256",
+        "report_json_sha256",
+        "report_md_sha256",
+        "reconciliation_digest"
+      ],
+      "properties": {
+        "run_index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "report_json_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "report_md_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "reconciliation_digest": {"type": "string"}
+      }
+    },
+    "disclosures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "de61432_and_dd0446e_were_pushed",
+        "result_commit_local_only",
+        "deep_lob_pending",
+        "no_publisher_verification"
+      ],
+      "properties": {
+        "de61432_and_dd0446e_were_pushed": {"type": "string"},
+        "result_commit_local_only": {"type": "boolean"},
+        "deep_lob_pending": {"type": "string"},
+        "no_publisher_verification": {"type": "string"}
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
