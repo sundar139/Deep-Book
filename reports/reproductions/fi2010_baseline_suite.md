@@ -884,7 +884,18 @@ No machine-readable numeric published-reference table was frozen before confirma
 
 ### Push Status
 
-Commits c3c9b98 and dc78a82 were subsequently pushed to origin/main despite original no-push instructions. Public history was not rewritten. The accepted classical/MLP snapshot is preserved byte-for-byte from its accepted historical state. Its raw-report hashes refer to the 650-run creation-time report/index artifacts and are intentionally historical, not hashes of the current 900-run report set. A follow-up repair commit (fix: restore immutable FI-2010 historical snapshot) restored the accepted bytes after the initial DeepLOB packaging commit had accidentally modified them. This DeepLOB result suite commit and the repair commit remain local.
+The DeepLOB result commit 40d77e1 was pushed to origin/main before independent review despite an explicit no-push instruction. The subsequent historical-snapshot repair commit 52fd936 and the current finalization commit remain local and have not been pushed. Public history was not rewritten. The prior push is disclosed as a workflow violation and does not alter the verified scientific results. Commits c3c9b98 and dc78a82 were also pushed to origin/main during earlier work.
+
+#### Push Provenance
+
+- remote_main_commit: `40d77e1b762ea07a879bef6911e287f77fe23659`
+- deeplob_result_commit: `40d77e1b762ea07a879bef6911e287f77fe23659`
+- deeplob_result_commit_pushed: True
+- historical_snapshot_repair_commit: `52fd93653a5cd9e9e2c6826268ddf6e37f3e3433`
+- historical_snapshot_repair_commit_pushed: False
+- current_packaging_commit_pushed: False
+- public_history_rewritten: False
+- prior_no_push_violation: True
 
 ### scikit-learn Limitation
 

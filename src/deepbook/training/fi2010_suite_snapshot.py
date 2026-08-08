@@ -496,18 +496,23 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
                 "unless separately preregistered before another execution."
             ),
             "push_status": (
-                "Commits c3c9b98 and dc78a82 were subsequently pushed to origin/main "
-                "despite original no-push instructions. Public history was not rewritten. "
-                "The accepted classical/MLP snapshot is preserved byte-for-byte from its "
-                "accepted historical state. Its raw-report hashes refer to the 650-run "
-                "creation-time report/index artifacts and are intentionally historical, "
-                "not hashes of the current 900-run report set. "
-                "A follow-up repair commit (fix: restore immutable FI-2010 historical "
-                "snapshot) restored the accepted bytes after the initial DeepLOB packaging "
-                "commit had accidentally modified them. "
-                "This DeepLOB result suite commit and the repair commit remain local."
+                "The DeepLOB result commit 40d77e1 was pushed to origin/main before "
+                "independent review despite an explicit no-push instruction. "
+                "The subsequent historical-snapshot repair commit 52fd936 and the "
+                "current finalization commit remain local and have not been pushed. "
+                "Public history was not rewritten. The prior push is disclosed as a "
+                "workflow violation and does not alter the verified scientific results. "
+                "Commits c3c9b98 and dc78a82 were also pushed to origin/main during "
+                "earlier work."
             ),
-            "result_commit_local_only": True,
+            "remote_main_commit": "40d77e1b762ea07a879bef6911e287f77fe23659",
+            "deeplob_result_commit": "40d77e1b762ea07a879bef6911e287f77fe23659",
+            "deeplob_result_commit_pushed": True,
+            "historical_snapshot_repair_commit": "52fd93653a5cd9e9e2c6826268ddf6e37f3e3433",
+            "historical_snapshot_repair_commit_pushed": False,
+            "current_packaging_commit_pushed": False,
+            "public_history_rewritten": False,
+            "prior_no_push_violation": True,
             "no_publisher_verification": (
                 "Local results are reproductions under the tracked protocol; "
                 "they are not publisher-verified benchmark values."
@@ -593,12 +598,17 @@ def _aggregate_metrics_suite(
     return result
 
 
-def write_suite_snapshot(root: Path) -> tuple[Path, Path]:
-    """Write the suite snapshot JSON and Markdown, return (json_path, md_path)."""
+def write_suite_snapshot(root: Path, output_dir: Path | None = None) -> tuple[Path, Path]:
+    """Write the suite snapshot JSON and Markdown, return (json_path, md_path).
+
+    When output_dir is None (default), writes to the tracked reproduction paths.
+    When provided, writes there instead (for testing).
+    """
     snapshot = build_suite_snapshot(root)
 
-    json_path = root / OUTPUT_JSON
-    md_path = root / OUTPUT_MD
+    base = output_dir if output_dir is not None else root
+    json_path = base / OUTPUT_JSON
+    md_path = base / OUTPUT_MD
     json_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -762,6 +772,20 @@ def _build_suite_markdown(snapshot: dict[str, Any]) -> list[str]:
     lines.append("### Push Status")
     lines.append("")
     lines.append(d["push_status"])
+    lines.append("")
+    lines.append("#### Push Provenance")
+    lines.append("")
+    lines.append(f"- remote_main_commit: `{d['remote_main_commit']}`")
+    lines.append(f"- deeplob_result_commit: `{d['deeplob_result_commit']}`")
+    lines.append(f"- deeplob_result_commit_pushed: {d['deeplob_result_commit_pushed']}")
+    lines.append(f"- historical_snapshot_repair_commit: `{d['historical_snapshot_repair_commit']}`")
+    lines.append(
+        f"- historical_snapshot_repair_commit_pushed: "
+        f"{d['historical_snapshot_repair_commit_pushed']}"
+    )
+    lines.append(f"- current_packaging_commit_pushed: {d['current_packaging_commit_pushed']}")
+    lines.append(f"- public_history_rewritten: {d['public_history_rewritten']}")
+    lines.append(f"- prior_no_push_violation: {d['prior_no_push_violation']}")
     lines.append("")
     lines.append("### scikit-learn Limitation")
     lines.append("")

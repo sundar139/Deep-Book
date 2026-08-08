@@ -2178,11 +2178,18 @@
     "training_seconds_min": 190.37113690003753
   },
   "disclosures": {
+    "current_packaging_commit_pushed": false,
     "data_audit_status": "The prior FI-2010 data-audit generated reports are preserved under provenance/quarantine history and are regenerable through the existing FI-2010 audit command. They are not duplicated in this result commit.",
+    "deeplob_result_commit": "40d77e1b762ea07a879bef6911e287f77fe23659",
+    "deeplob_result_commit_pushed": true,
+    "historical_snapshot_repair_commit": "52fd93653a5cd9e9e2c6826268ddf6e37f3e3433",
+    "historical_snapshot_repair_commit_pushed": false,
     "no_publisher_verification": "Local results are reproductions under the tracked protocol; they are not publisher-verified benchmark values.",
+    "prior_no_push_violation": true,
+    "public_history_rewritten": false,
     "published_reference_note": "No machine-readable numeric published-reference table was frozen before confirmatory DeepLOB execution. Therefore a numerical paper-comparison threshold is not treated as a confirmatory acceptance criterion for this completed matrix. The study reports the observed DeepLOB results, complete protocol provenance, and documented implementation differences. Any later numeric literature comparison must be labeled contextual/post-confirmatory unless separately preregistered before another execution.",
-    "push_status": "Commits c3c9b98 and dc78a82 were subsequently pushed to origin/main despite original no-push instructions. Public history was not rewritten. The accepted classical/MLP snapshot is preserved byte-for-byte from its accepted historical state. Its raw-report hashes refer to the 650-run creation-time report/index artifacts and are intentionally historical, not hashes of the current 900-run report set. A follow-up repair commit (fix: restore immutable FI-2010 historical snapshot) restored the accepted bytes after the initial DeepLOB packaging commit had accidentally modified them. This DeepLOB result suite commit and the repair commit remain local.",
-    "result_commit_local_only": true,
+    "push_status": "The DeepLOB result commit 40d77e1 was pushed to origin/main before independent review despite an explicit no-push instruction. The subsequent historical-snapshot repair commit 52fd936 and the current finalization commit remain local and have not been pushed. Public history was not rewritten. The prior push is disclosed as a workflow violation and does not alter the verified scientific results. Commits c3c9b98 and dc78a82 were also pushed to origin/main during earlier work.",
+    "remote_main_commit": "40d77e1b762ea07a879bef6911e287f77fe23659",
     "scikit_learn_limitation": "Random Forest execution-time scikit-learn version was not captured in manifests. Current environment information cannot prove the historical execution-time version; the value therefore remains unknown. This is a classical Random Forest reproducibility limitation and does not alter PyTorch/CUDA provenance for DeepLOB."
   },
   "environment": {

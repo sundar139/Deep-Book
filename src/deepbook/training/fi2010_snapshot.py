@@ -422,11 +422,47 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     # accepted dc78a82 historical snapshot and refer to the raw reports/index
     # that existed when the 650-run classical/MLP epoch was completed.
     # They are NOT current 900-run hashes and must not be recomputed.
+    #
+    # Fail loudly if the provenance file is missing or incomplete — silent
+    # fallback would allow accidental mutation of the historical snapshot.
     provenance_path = root / "configs" / "references" / "fi2010_classical_snapshot_provenance.yaml"
-    frozen_raw_hashes = {}
-    if provenance_path.is_file():
-        prov = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
-        frozen_raw_hashes = prov.get("creation_time_raw_report_hashes", {})
+    if not provenance_path.is_file():
+        raise FileNotFoundError(
+            f"Historical snapshot provenance file missing: {provenance_path}. "
+            "This file is required for historical snapshot reproduction."
+        )
+    prov = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
+    raw_hashes = prov.get("creation_time_raw_report_hashes")
+    if not isinstance(raw_hashes, dict):
+        raise ValueError(
+            f"Provenance file {provenance_path} is missing "
+            "'creation_time_raw_report_hashes' section."
+        )
+    frozen_run_index = raw_hashes.get("run_index_sha256")
+    frozen_report_json = raw_hashes.get("report_json_sha256")
+    frozen_report_md = raw_hashes.get("report_md_sha256")
+    if not frozen_run_index or not frozen_report_json or not frozen_report_md:
+        missing = []
+        if not frozen_run_index:
+            missing.append("run_index_sha256")
+        if not frozen_report_json:
+            missing.append("report_json_sha256")
+        if not frozen_report_md:
+            missing.append("report_md_sha256")
+        raise ValueError(
+            f"Provenance file {provenance_path} is missing required fields: "
+            f"{', '.join(missing)}. All three creation-time hashes are required."
+        )
+    # Validate hash shape
+    for name, value in [
+        ("run_index_sha256", frozen_run_index),
+        ("report_json_sha256", frozen_report_json),
+        ("report_md_sha256", frozen_report_md),
+    ]:
+        if not isinstance(value, str) or len(value) != 64:
+            raise ValueError(
+                f"Provenance field {name} must be a 64-character hex string, got: {value!r}"
+            )
 
     # Coverage from run_index — filter to selected models only
     completed = run_index.get("completed_confirmatory", [])
@@ -559,18 +595,9 @@ def build_snapshot(root: Path) -> dict[str, Any]:
         "aggregates": aggregates,
         "environment": env_info,
         "hashes": {
-            "run_index_sha256": frozen_raw_hashes.get(
-                "run_index_sha256",
-                "e2a77af4488eaab152d41d56ac6d7f3659948dcad20c30f2038d87db4b04bcb8",
-            ),
-            "report_json_sha256": frozen_raw_hashes.get(
-                "report_json_sha256",
-                "7caf67c12f0c4a23ed1895b92c0e69943fdf6d7e4aa9883e369b41871f0f410e",
-            ),
-            "report_md_sha256": frozen_raw_hashes.get(
-                "report_md_sha256",
-                "bd5410ba7e5cae0938cd0eb682b3d79acd6e94ff8499aa9c6d80b9a76aff00f1",
-            ),
+            "run_index_sha256": frozen_run_index,
+            "report_json_sha256": frozen_report_json,
+            "report_md_sha256": frozen_report_md,
             "reconciliation_digest": reconciliation_digest,
         },
         "disclosures": {
@@ -606,12 +633,17 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     return snapshot
 
 
-def write_snapshot(root: Path) -> tuple[Path, Path]:
-    """Write the deterministic snapshot JSON and Markdown, return (json_path, md_path)."""
+def write_snapshot(root: Path, output_dir: Path | None = None) -> tuple[Path, Path]:
+    """Write the deterministic snapshot JSON and Markdown, return (json_path, md_path).
+
+    When output_dir is None (default), writes to the tracked reproduction paths.
+    When provided, writes there instead (for testing).
+    """
     snapshot = build_snapshot(root)
 
-    json_path = root / _OUTPUT_JSON
-    md_path = root / _OUTPUT_MD
+    base = output_dir if output_dir is not None else root
+    json_path = base / _OUTPUT_JSON
+    md_path = base / _OUTPUT_MD
 
     json_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.parent.mkdir(parents=True, exist_ok=True)
