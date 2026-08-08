@@ -7,6 +7,7 @@ confirmatory artifact tree — all six models: classical, MLP-LOB, and DeepLOB.
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,61 @@ RUNS_DIR = "artifacts/fi2010/baselines/runs"
 
 _EXECUTION_COMMIT = "dc78a82d206ab50399bea0a0c147884a94c66e8f"
 _PROTOCOL_COMMIT = "f254599eb215558588aed0647a3e3317dab36da3"
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def read_git_state(root: Path) -> dict[str, Any]:
+    """Read the live local/remote state used to validate the frozen disclosure."""
+    remote_main = _git(root, "rev-parse", "origin/main")
+    ls_remote = _git(root, "ls-remote", "origin", "refs/heads/main").split()[0]
+    current_commit = _git(root, "rev-parse", "HEAD")
+    commits = {
+        "deeplob_result_commit": "40d77e1b762ea07a879bef6911e287f77fe23659",
+        "historical_snapshot_repair_commit": "52fd93653a5cd9e9e2c6826268ddf6e37f3e3433",
+        "provenance_hardening_commit": "00da49d5a14269395cc4a737b0415edf6cb48a84",
+        "current_finalization_commit": current_commit,
+    }
+    contains = {
+        field: bool(_git(root, "branch", "-r", "--contains", commit))
+        for field, commit in commits.items()
+    }
+    return {
+        "remote_main_commit": remote_main,
+        "ls_remote_main_commit": ls_remote,
+        "contains": contains,
+    }
+
+
+def validate_declared_git_state(declared: dict[str, Any], observed: dict[str, Any]) -> None:
+    """Fail closed when the frozen push disclosure disagrees with live Git."""
+    for field in ("remote_main_commit",):
+        if declared[field] != observed[field]:
+            raise ValueError(f"{field}: declared {declared[field]!r}, observed {observed[field]!r}")
+    if observed["remote_main_commit"] != observed["ls_remote_main_commit"]:
+        raise ValueError(
+            "remote_main_commit: local tracking ref "
+            f"{observed['remote_main_commit']!r} disagrees with ls-remote "
+            f"{observed['ls_remote_main_commit']!r}"
+        )
+    for field in (
+        "deeplob_result_commit_pushed",
+        "historical_snapshot_repair_commit_pushed",
+        "provenance_hardening_commit_pushed",
+        "current_finalization_commit_pushed",
+    ):
+        expected = bool(declared[field])
+        actual = bool(observed["contains"][field.removesuffix("_pushed")])
+        if expected != actual:
+            raise ValueError(f"{field}: declared {expected!r}, observed {actual!r}")
 
 
 def _deep_lob_aggregates(manifests: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -546,6 +602,7 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
         ],
     }
 
+    validate_declared_git_state(snapshot["disclosures"], read_git_state(root))
     return snapshot
 
 

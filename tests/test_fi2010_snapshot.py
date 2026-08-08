@@ -297,27 +297,43 @@ def test_tracked_provenance_unchanged():
 # ============================================================
 
 
-def test_mismatched_bytes_detected_without_dirtying_tracked(tmp_path):
-    """Deliberate byte mismatch is detected; tracked files unchanged."""
-    import hashlib
+def assert_snapshot_bytes_match(actual: Path, expected: bytes) -> None:
+    """Assert generated output against an explicit expected byte sequence."""
+    actual_bytes = actual.read_bytes()
+    if actual_bytes != expected:
+        raise AssertionError(f"snapshot bytes differ: {actual}")
 
-    j_before = hashlib.sha256(TRACKED_JSON.read_bytes()).hexdigest()
-    m_before = hashlib.sha256(TRACKED_MD.read_bytes()).hexdigest()
+
+def test_mismatched_bytes_detected_without_dirtying_tracked(tmp_path):
+    """The real mismatch path fails without dirtying tracked files or config."""
+    import hashlib
+    import subprocess
+
+    tracked_before = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (TRACKED_JSON, TRACKED_MD, SCHEMA_PATH, TRACKED_PROVENANCE)
+    }
+    status_before = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout
 
     prov = _write_provenance(tmp_path, _valid_provenance())
     _, jp, mp = _generate_snapshot(tmp_path, prov_path=prov)
+    assert_snapshot_bytes_match(jp, TRACKED_JSON.read_bytes())
+    assert_snapshot_bytes_match(mp, TRACKED_MD.read_bytes())
+    with pytest.raises(AssertionError, match="snapshot bytes differ"):
+        assert_snapshot_bytes_match(jp, b"definitely wrong bytes")
 
-    # Normal match
-    assert jp.read_bytes() == TRACKED_JSON.read_bytes()
-    assert mp.read_bytes() == TRACKED_MD.read_bytes()
-
-    # Intentional mismatch detection
-    assert jp.read_bytes() != b"definitely wrong bytes"
-    assert mp.read_bytes() != b"also wrong"
-
-    # Tracked files unchanged
-    assert hashlib.sha256(TRACKED_JSON.read_bytes()).hexdigest() == j_before
-    assert hashlib.sha256(TRACKED_MD.read_bytes()).hexdigest() == m_before
+    assert (
+        status_before
+        == subprocess.run(
+            ["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True
+        ).stdout
+    )
+    assert tracked_before == {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (TRACKED_JSON, TRACKED_MD, SCHEMA_PATH, TRACKED_PROVENANCE)
+    }
 
 
 def test_snapshot_does_not_dirty_repo():
@@ -410,6 +426,77 @@ def test_suite_push_disclosure_truthful(tracked_suite):
     assert "40d77e1" in d["push_status"]
     assert "52fd936" in d["push_status"]
     assert "00da49d" in d["push_status"]
+
+
+def _synthetic_git_state(remote="00da49d"):
+    return {
+        "remote_main_commit": remote,
+        "ls_remote_main_commit": remote,
+        "contains": {
+            "deeplob_result_commit": True,
+            "historical_snapshot_repair_commit": True,
+            "provenance_hardening_commit": True,
+            "current_finalization_commit": False,
+        },
+    }
+
+
+def _synthetic_disclosure():
+    return {
+        "remote_main_commit": "00da49d",
+        "deeplob_result_commit_pushed": True,
+        "historical_snapshot_repair_commit_pushed": True,
+        "provenance_hardening_commit_pushed": True,
+        "current_finalization_commit_pushed": False,
+    }
+
+
+def test_declared_git_state_accepts_frozen_disclosure():
+    from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
+
+    validate_declared_git_state(_synthetic_disclosure(), _synthetic_git_state())
+
+
+@pytest.mark.parametrize(
+    ("field", "observed"),
+    [
+        ("remote_main_commit", _synthetic_git_state(remote="other")),
+        (
+            "historical_snapshot_repair_commit_pushed",
+            {
+                **_synthetic_git_state(),
+                "contains": {
+                    **_synthetic_git_state()["contains"],
+                    "historical_snapshot_repair_commit": False,
+                },
+            },
+        ),
+        (
+            "current_finalization_commit_pushed",
+            {
+                **_synthetic_git_state(),
+                "contains": {
+                    **_synthetic_git_state()["contains"],
+                    "current_finalization_commit": True,
+                },
+            },
+        ),
+    ],
+)
+def test_declared_git_state_rejects_mismatches(field, observed):
+    from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
+
+    with pytest.raises(ValueError, match=field):
+        validate_declared_git_state(_synthetic_disclosure(), observed)
+
+
+def test_declared_git_state_rejects_stale_tracking_ref():
+    from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
+
+    observed = _synthetic_git_state()
+    observed["ls_remote_main_commit"] = "other"
+    with pytest.raises(ValueError, match="ls-remote"):
+        validate_declared_git_state(_synthetic_disclosure(), observed)
 
 
 def test_suite_no_absolute_paths(tracked_suite):
