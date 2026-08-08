@@ -251,15 +251,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "run_index_sha256",
-        "report_json_sha256",
-        "report_md_sha256",
         "reconciliation_digest"
       ],
       "properties": {
-        "run_index_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "report_json_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "report_md_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "reconciliation_digest": {"type": "string"}
       }
     },

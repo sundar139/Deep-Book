@@ -365,6 +365,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("prepare", help="verify data contracts and cache readiness")
     sub.add_parser("report", help="generate deterministic JSON and Markdown reports")
     sub.add_parser("snapshot", help="generate deterministic tracked reproduction snapshot")
+    sub.add_parser(
+        "snapshot-suite", help="generate complete 900-cell FI-2010 baseline suite snapshot"
+    )
 
     verify = sub.add_parser("verify-run", help="verify run manifest, hashes, and metrics")
     verify.add_argument("--run-id", required=True, help="run ID to verify")
@@ -382,6 +385,13 @@ def main(argv: list[str] | None = None) -> int:
         json_path, md_path = write_snapshot(root)
         print(f"Snapshot JSON: {json_path}")
         print(f"Snapshot Markdown: {md_path}")
+        return 0
+    if args.command == "snapshot-suite":
+        from deepbook.training.fi2010_suite_snapshot import write_suite_snapshot
+
+        json_path, md_path = write_suite_snapshot(root)
+        print(f"Suite Snapshot JSON: {json_path}")
+        print(f"Suite Snapshot Markdown: {md_path}")
         return 0
     if args.command == "verify-run":
         return _cmd_verify_run(root, args.run_id)

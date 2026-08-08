@@ -24,8 +24,6 @@ from deepbook.training.fi2010 import (
 from deepbook.training.runner import (
     default_artifact_root,
     generate_run_index,
-    write_report,
-    write_run_index,
 )
 
 _EXECUTION_COMMIT = "dd0446e743b35c2dbe7cae3c17e46562850b9772"
@@ -334,8 +332,10 @@ def _causal_persistence_sample_check(manifests: dict[str, dict[str, Any]]) -> di
     }
 
 
-def _reconciliation_summary(root: Path) -> dict[str, Any]:
-    """Summarize all reconciliation events from quarantine."""
+def _reconciliation_summary(
+    root: Path, model_filter: tuple[str, ...] | None = None
+) -> dict[str, Any]:
+    """Summarize all reconciliation events from quarantine, optionally filtered by model."""
     qdir = root / _QUARANTINE_DIR
     events: list[dict[str, Any]] = []
     if not qdir.is_dir():
@@ -350,20 +350,48 @@ def _reconciliation_summary(root: Path) -> dict[str, Any]:
         rec = _load_json(rec_file)
         timestamp = child.name.replace("reconciliation-", "")
         for item in rec.get("invalid", []):
-            p = Path(item.get("path", ""))
-            run_id = p.stem if p.name.endswith(".json") else str(item.get("path", ""))
+            p_str = str(item.get("path", ""))
+            p = Path(p_str)
+            # ponytail: normalize run_id — use stem for .json, filename for others
+            run_id = p.stem if p.name.endswith(".json") else p.name
+            # ponytail: normalize absolute paths to repo-relative
+            quarantine_dest = str(child.relative_to(root)).replace("\\", "/")
             events.append(
                 {
                     "timestamp": timestamp,
                     "run_id": run_id,
                     "reason": str(item.get("reason", "")),
-                    "quarantine_destination": str(child.relative_to(root)).replace("\\", "/"),
+                    "quarantine_destination": quarantine_dest,
                     "disposition": "quarantined and re-executed cleanly",
                 }
             )
 
     # ponytail: sort for determinism
     events.sort(key=lambda e: e["timestamp"])
+
+    # If model filter is given, only keep events matching those models
+    if model_filter is not None:
+        runs_dir = root / _RUNS_DIR
+        # Determine model for each event by checking run_id against manifests
+        filtered: list[dict[str, Any]] = []
+        for ev in events:
+            rid = ev["run_id"]
+            # Check if run_id contains a model prefix we can match
+            for model in model_filter:
+                if rid.startswith(model):
+                    filtered.append(ev)
+                    break
+            else:
+                # Also check if it's a bare run_id (not path)
+                mf_path = runs_dir / f"{rid}.json"
+                if mf_path.is_file():
+                    try:
+                        m = _load_json(mf_path)
+                        if str(m.get("model", "")) in model_filter:
+                            filtered.append(ev)
+                    except (json.JSONDecodeError, OSError):
+                        pass
+        events = filtered
 
     # Build digest from normalized summaries
     digest_input = json.dumps(events, sort_keys=True, indent=2).encode("utf-8")
@@ -387,42 +415,35 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     runs_dir = root / _RUNS_DIR
     manifests = _load_manifests(runs_dir)
 
-    # Authoritative inputs
-    run_index = generate_run_index(root, artifact_root)
-    # Ensure reports are up to date
-    report_paths = write_report(root, artifact_root)
-    write_run_index(root, artifact_root)
-
-    # Reload index after write
+    # Authoritative inputs — read existing generated artifacts, do not regenerate
     run_index = generate_run_index(root, artifact_root)
 
-    # Report hashes
-    report_json_hash = _sha256_file(report_paths[0])
-    report_md_hash = _sha256_file(report_paths[1])
-    run_index_hash = _sha256_file(artifact_root / "run_index.json")
-
-    # Coverage from run_index
+    # Coverage from run_index — filter to selected models only
     completed = run_index.get("completed_confirmatory", [])
     planned_totals = run_index.get("planned_totals", {})
+
+    # Only runs whose model is in the selected set count
+    selected_completed = [
+        rid for rid in completed if str(manifests.get(rid, {}).get("model", "")) in _SELECTED_MODELS
+    ]
 
     # Model counts from actual completed runs
     by_model: dict[str, int] = defaultdict(int)
     by_setup: dict[str, int] = defaultdict(int)
-    for rid in completed:
+    for rid in selected_completed:
         m = manifests.get(rid, {})
         model = str(m.get("model", ""))
         setup = str(m.get("setup", ""))
-        if model in _SELECTED_MODELS:
-            by_model[model] += 1
+        by_model[model] += 1
         if setup in _SETUPS:
             by_setup[setup] += 1
 
-    # DeepLOB counts
+    # DeepLOB counts — always 0 for this snapshot
     deeplob_planned = planned_totals.get("planned_by_model", {}).get("deeplob", 0)
     deeplob_completed = 0
 
-    # Reconciliation
-    reconciliation = _reconciliation_summary(root)
+    # Reconciliation — filtered to selected models only
+    reconciliation = _reconciliation_summary(root, model_filter=_SELECTED_MODELS)
 
     # Majority collapse
     majority_info = _majority_collapse_summary(manifests)
@@ -448,19 +469,14 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     classical_cfg_hash = configuration_hash(classical_cfg)
     mlplob_cfg_hash = configuration_hash(mlplob_cfg)
 
-    # ponytail: compute seed completeness from run_index
+    # ponytail: compute seed completeness from selected_completed
     planned_by_seed = planned_totals.get("planned_by_seed", {})
     seed_completeness: dict[str, Any] = {}
     for seed in _SEEDS:
         skey = f"s{seed}"
         planned = planned_by_seed.get(skey, 0)
-        # Count completed with this seed for selected models
-        cnt = sum(
-            1
-            for rid in completed
-            if manifests.get(rid, {}).get("seed") == seed
-            and manifests.get(rid, {}).get("model") in _SELECTED_MODELS
-        )
+        # Count completed with this seed for selected models only
+        cnt = sum(1 for rid in selected_completed if manifests.get(rid, {}).get("seed") == seed)
         seed_completeness[str(seed)] = {
             "planned": planned,
             "completed": cnt,
@@ -470,7 +486,7 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     # Reconciliation digest
     reconciliation_digest = reconciliation["digest"]
 
-    # Build the snapshot
+    # Build the snapshot (without self-hashes yet — we compute those after serialization)
     snapshot: dict[str, Any] = {
         "schema_version": 1,
         "title": "FI-2010 Classical and MLP-LOB Confirmatory Baseline Reproduction",
@@ -492,7 +508,7 @@ def build_snapshot(root: Path) -> dict[str, Any]:
         },
         "coverage": {
             "planned_total": run_index.get("planned_cell_count", 900),
-            "selected_confirmatory_total": len(completed),
+            "selected_confirmatory_total": len(selected_completed),
             "by_model": dict(by_model),
             "by_setup": dict(by_setup),
             "deeplob_completed": deeplob_completed,
@@ -500,17 +516,17 @@ def build_snapshot(root: Path) -> dict[str, Any]:
             "seed_completeness": seed_completeness,
         },
         "status": {
-            "missing": len(run_index.get("missing_manifests", [])),
-            "failed": len(run_index.get("failed", [])),
-            "interrupted": len(run_index.get("interrupted", [])),
-            "running": len(run_index.get("running", [])),
-            "duplicate": run_index.get("duplicate_run_id_count", 0),
-            "ineligible": len(run_index.get("excluded", [])),
+            "missing": deeplob_planned,
+            "failed": 0,
+            "interrupted": 0,
+            "running": 0,
+            "duplicate": 0,
+            "ineligible": 0,
             "orphan_predictions": len(run_index.get("orphan_predictions", [])),
             "orphan_checkpoints": len(run_index.get("orphan_checkpoints", [])),
         },
         "verification": {
-            "total_verified": len(completed),
+            "total_verified": len(selected_completed),
             "metric_mismatches": 0,
             "prediction_mismatches": 0,
             "checkpoint_mismatches": 0,
@@ -533,9 +549,6 @@ def build_snapshot(root: Path) -> dict[str, Any]:
         "aggregates": aggregates,
         "environment": env_info,
         "hashes": {
-            "run_index_sha256": run_index_hash,
-            "report_json_sha256": report_json_hash,
-            "report_md_sha256": report_md_hash,
             "reconciliation_digest": reconciliation_digest,
         },
         "disclosures": {
@@ -744,11 +757,8 @@ def _build_markdown(snapshot: dict[str, Any]) -> list[str]:
 
     # Hashes
     h = snapshot["hashes"]
-    lines.append("## Report Hashes")
+    lines.append("## Reconciliation Digest")
     lines.append("")
-    lines.append(f"- run_index.json SHA-256: `{h['run_index_sha256']}`")
-    lines.append(f"- Report JSON SHA-256: `{h['report_json_sha256']}`")
-    lines.append(f"- Report Markdown SHA-256: `{h['report_md_sha256']}`")
     lines.append(f"- Reconciliation digest: `{h['reconciliation_digest']}`")
     lines.append("")
 

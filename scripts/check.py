@@ -53,10 +53,11 @@ def main() -> int:
             "tests/unit",
             "tests/property",
             "tests/smoke",
+            "tests/test_fi2010_snapshot.py",
             "-q",
             "--tb=short",
         ],
-        "Pytest (unit + property + smoke)",
+        "Pytest (unit + property + smoke + snapshot regression)",
     )
     failures += run(
         [sys.executable, str(ROOT / "scripts" / "check_repository_policy.py")],

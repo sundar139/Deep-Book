@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepbook.dev/schemas/fi2010_baseline_suite_reproduction.schema.json",
+  "title": "FI-2010 Baseline Suite Reproduction Snapshot",
+  "description": "Deterministic tracked snapshot of the complete FI-2010 baseline suite confirmatory reproduction including DeepLOB.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "title",
+    "study_scope",
+    "protocol_provenance",
+    "coverage",
+    "verification",
+    "deeplob",
+    "deep_lob_aggregates",
+    "classical_aggregates",
+    "majority_collapse",
+    "causal_persistence_sample_counts",
+    "reconciliation",
+    "environment",
+    "hashes",
+    "disclosures",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "title": {"type": "string"},
+    "study_scope": {"type": "string"},
+    "protocol_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_commit",
+        "protocol_commit",
+        "protocol_sha256",
+        "archive_sha256",
+        "configuration_hashes",
+        "source_fingerprint",
+        "standard_deviation_convention"
+      ],
+      "properties": {
+        "execution_commit": {"type": "string"},
+        "protocol_commit": {"type": "string"},
+        "protocol_sha256": {"type": "string"},
+        "archive_sha256": {"type": "string"},
+        "configuration_hashes": {"type": "object", "additionalProperties": {"type": "string"}},
+        "source_fingerprint": {"type": "string"},
+        "standard_deviation_convention": {"type": "string"}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planned_total",
+        "completed_confirmatory",
+        "missing",
+        "failed",
+        "interrupted",
+        "running",
+        "by_model",
+        "by_setup"
+      ],
+      "properties": {
+        "planned_total": {"type": "integer"},
+        "completed_confirmatory": {"type": "integer"},
+        "missing": {"type": "integer"},
+        "failed": {"type": "integer"},
+        "interrupted": {"type": "integer"},
+        "running": {"type": "integer"},
+        "duplicates": {"type": "integer"},
+        "ineligible": {"type": "integer"},
+        "orphan_predictions": {"type": "integer"},
+        "orphan_checkpoints": {"type": "integer"},
+        "by_model": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "by_setup": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "horizons": {"type": "array", "items": {"type": "integer"}},
+        "seeds": {"type": "array", "items": {"type": "integer"}}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_verified",
+        "metric_mismatches",
+        "prediction_mismatches",
+        "checkpoint_mismatches",
+        "provenance_mismatches"
+      ],
+      "properties": {
+        "total_verified": {"type": "integer"},
+        "metric_mismatches": {"type": "integer"},
+        "prediction_mismatches": {"type": "integer"},
+        "checkpoint_mismatches": {"type": "integer"},
+        "provenance_mismatches": {"type": "integer"}
+      }
+    },
+    "deeplob": {"type": "object", "additionalProperties": true},
+    "deep_lob_aggregates": {"type": "object", "additionalProperties": true},
+    "classical_aggregates": {"type": "object", "additionalProperties": true},
+    "majority_collapse": {"type": "object", "additionalProperties": true},
+    "causal_persistence_sample_counts": {"type": "object", "additionalProperties": true},
+    "reconciliation": {"type": "object", "additionalProperties": true},
+    "environment": {"type": "object", "additionalProperties": true},
+    "hashes": {"type": "object", "additionalProperties": true},
+    "disclosures": {"type": "object", "additionalProperties": true},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}
