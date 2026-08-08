@@ -1,0 +1,18 @@
+# Frozen creation-time provenance for the FI-2010 classical/MLP-LOB
+# historical reproduction snapshot.
+#
+# These values were captured when the historical snapshot was created
+# (commit dd0446e, later committed at dc78a82).  They refer to the
+# raw report and run-index artifacts at that creation time.
+#
+# They are NOT current 900-run hashes and are intentionally frozen.
+# The historical snapshot generator uses these as immutable provenance;
+# dynamic recomputation after later model additions would change them.
+#
+# DO NOT UPDATE unless a new historical snapshot epoch is deliberately
+# created and accepted.
+
+creation_time_raw_report_hashes:
+  run_index_sha256: e2a77af4488eaab152d41d56ac6d7f3659948dcad20c30f2038d87db4b04bcb8
+  report_json_sha256: 7caf67c12f0c4a23ed1895b92c0e69943fdf6d7e4aa9883e369b41871f0f410e
+  report_md_sha256: bd5410ba7e5cae0938cd0eb682b3d79acd6e94ff8499aa9c6d80b9a76aff00f1

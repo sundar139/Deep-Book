@@ -418,6 +418,16 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     # Authoritative inputs — read existing generated artifacts, do not regenerate
     run_index = generate_run_index(root, artifact_root)
 
+    # Frozen creation-time provenance — these hashes are captured from the
+    # accepted dc78a82 historical snapshot and refer to the raw reports/index
+    # that existed when the 650-run classical/MLP epoch was completed.
+    # They are NOT current 900-run hashes and must not be recomputed.
+    provenance_path = root / "configs" / "references" / "fi2010_classical_snapshot_provenance.yaml"
+    frozen_raw_hashes = {}
+    if provenance_path.is_file():
+        prov = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
+        frozen_raw_hashes = prov.get("creation_time_raw_report_hashes", {})
+
     # Coverage from run_index — filter to selected models only
     completed = run_index.get("completed_confirmatory", [])
     planned_totals = run_index.get("planned_totals", {})
@@ -549,6 +559,18 @@ def build_snapshot(root: Path) -> dict[str, Any]:
         "aggregates": aggregates,
         "environment": env_info,
         "hashes": {
+            "run_index_sha256": frozen_raw_hashes.get(
+                "run_index_sha256",
+                "e2a77af4488eaab152d41d56ac6d7f3659948dcad20c30f2038d87db4b04bcb8",
+            ),
+            "report_json_sha256": frozen_raw_hashes.get(
+                "report_json_sha256",
+                "7caf67c12f0c4a23ed1895b92c0e69943fdf6d7e4aa9883e369b41871f0f410e",
+            ),
+            "report_md_sha256": frozen_raw_hashes.get(
+                "report_md_sha256",
+                "bd5410ba7e5cae0938cd0eb682b3d79acd6e94ff8499aa9c6d80b9a76aff00f1",
+            ),
             "reconciliation_digest": reconciliation_digest,
         },
         "disclosures": {
@@ -757,8 +779,11 @@ def _build_markdown(snapshot: dict[str, Any]) -> list[str]:
 
     # Hashes
     h = snapshot["hashes"]
-    lines.append("## Reconciliation Digest")
+    lines.append("## Report Hashes")
     lines.append("")
+    lines.append(f"- run_index.json SHA-256: `{h['run_index_sha256']}`")
+    lines.append(f"- Report JSON SHA-256: `{h['report_json_sha256']}`")
+    lines.append(f"- Report Markdown SHA-256: `{h['report_md_sha256']}`")
     lines.append(f"- Reconciliation digest: `{h['reconciliation_digest']}`")
     lines.append("")
 

@@ -28,6 +28,16 @@ _SUITE_MODELS = _SELECTED_MODELS + ("deeplob",)
 _ALL_SEEDS = (1337, 2027, 31415, 424242, 8675309)
 _HORIZONS = (10, 20, 30, 50, 100)
 
+# Accepted dc78a82 historical snapshot hashes
+_ACCEPTED_HISTORICAL_JSON_SHA256 = (
+    "bc2619908651e78b81a1d7878d56d0fccca89fcc0acddc4e4cf8fdd006b364ac"
+)
+_ACCEPTED_HISTORICAL_MD_SHA256 = "d83c247ca05927c0a42be075f37a2694ae97500ed43e6977c4d643db775ece3f"
+# Creation-time frozen provenance hashes
+_FROZEN_RUN_INDEX_SHA256 = "e2a77af4488eaab152d41d56ac6d7f3659948dcad20c30f2038d87db4b04bcb8"
+_FROZEN_REPORT_JSON_SHA256 = "7caf67c12f0c4a23ed1895b92c0e69943fdf6d7e4aa9883e369b41871f0f410e"
+_FROZEN_REPORT_MD_SHA256 = "bd5410ba7e5cae0938cd0eb682b3d79acd6e94ff8499aa9c6d80b9a76aff00f1"
+
 
 # ============================================================
 # Historical snapshot fixtures
@@ -65,6 +75,16 @@ def test_historical_schema_valid(snapshot):
 
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=snapshot, schema=schema)
+
+
+def test_historical_schema_requires_report_hashes():
+    """Schema must require all three creation-time report hashes."""
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    required = schema["properties"]["hashes"]["required"]
+    assert "run_index_sha256" in required
+    assert "report_json_sha256" in required
+    assert "report_md_sha256" in required
+    assert "reconciliation_digest" in required
 
 
 # ============================================================
@@ -165,17 +185,29 @@ def test_reconciliation_digest(snapshot):
 
 
 # ============================================================
-# Historical snapshot — hashes
+# Historical snapshot — frozen creation-time hashes
 # ============================================================
+
+
+def test_frozen_run_index_hash(snapshot):
+    assert snapshot["hashes"]["run_index_sha256"] == _FROZEN_RUN_INDEX_SHA256
+
+
+def test_frozen_report_json_hash(snapshot):
+    assert snapshot["hashes"]["report_json_sha256"] == _FROZEN_REPORT_JSON_SHA256
+
+
+def test_frozen_report_md_hash(snapshot):
+    assert snapshot["hashes"]["report_md_sha256"] == _FROZEN_REPORT_MD_SHA256
 
 
 def test_report_hashes_present(snapshot):
     h = snapshot["hashes"]
+    # All four hashes must exist with correct lengths
+    assert len(h["run_index_sha256"]) == 64
+    assert len(h["report_json_sha256"]) == 64
+    assert len(h["report_md_sha256"]) == 64
     assert len(h["reconciliation_digest"]) >= 64
-
-
-def test_reconciliation_digest_present(snapshot):
-    assert len(snapshot["reconciliation"]["digest"]) > 0
 
 
 # ============================================================
@@ -220,7 +252,6 @@ def test_no_checkpoint_content(snapshot):
 
 
 def test_no_local_absolute_paths(snapshot):
-    """No local absolute paths in historical snapshot."""
     json_text = SNAPSHOT_JSON.read_text(encoding="utf-8")
     assert "C:\\\\Users" not in json_text
     assert "/home/" not in json_text
@@ -245,32 +276,73 @@ def test_markdown_exists(snapshot):
     assert "# FI-2010 Classical and MLP-LOB" in md_text
 
 
-def test_snapshot_byte_identical(snapshot):
-    """Snapshot generation is deterministic — does not mutate tracked files."""
+# ============================================================
+# Historical snapshot — isolation tests (do NOT mutate tracked files)
+# ============================================================
+
+
+def test_historical_snapshot_bytes_match_accepted():
+    """Historical JSON and MD must be byte-identical to dc78a82."""
+    import hashlib
+
+    json_bytes = SNAPSHOT_JSON.read_bytes()
+    md_bytes = SNAPSHOT_MD.read_bytes()
+    assert hashlib.sha256(json_bytes).hexdigest() == _ACCEPTED_HISTORICAL_JSON_SHA256
+    assert hashlib.sha256(md_bytes).hexdigest() == _ACCEPTED_HISTORICAL_MD_SHA256
+
+
+def test_snapshot_generator_idempotent_twice():
+    """Two snapshot invocations produce identical bytes (determinism)."""
     import subprocess
     import sys
 
-    # Write to temp dir, verify runs twice produce same output
-    with tempfile.TemporaryDirectory():
-        # Simulate by reading the existing snapshot, writing a fresh copy via the generator
-        # and verifying it matches the tracked file. The generator writes to fixed paths,
-        # so we can't redirect output. Instead verify the tracked file is idempotent.
-        before_json = SNAPSHOT_JSON.read_bytes()
-        before_md = SNAPSHOT_MD.read_bytes()
+    first_json = SNAPSHOT_JSON.read_bytes()
+    first_md = SNAPSHOT_MD.read_bytes()
 
-        result = subprocess.run(
-            [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, f"Second snapshot failed: {result.stderr}"
+    result = subprocess.run(
+        [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Second snapshot failed: {result.stderr}"
 
-        after_json = SNAPSHOT_JSON.read_bytes()
-        after_md = SNAPSHOT_MD.read_bytes()
+    second_json = SNAPSHOT_JSON.read_bytes()
+    second_md = SNAPSHOT_MD.read_bytes()
 
-        assert before_json == after_json, "JSON not byte-identical across two runs"
-        assert before_md == after_md, "Markdown not byte-identical across two runs"
+    assert first_json == second_json, "JSON not byte-identical across two runs"
+    assert first_md == second_md, "Markdown not byte-identical across two runs"
+
+
+def test_snapshot_does_not_mutate_tracked_files():
+    """Generating snapshots leaves git status unchanged."""
+    import subprocess
+    import sys
+
+    before = subprocess.run(
+        ["git", "status", "--short"], cwd=ROOT, capture_output=True, text=True
+    ).stdout
+
+    result = subprocess.run(
+        [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+
+    result2 = subprocess.run(
+        [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot-suite"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result2.returncode == 0
+
+    after = subprocess.run(
+        ["git", "status", "--short"], cwd=ROOT, capture_output=True, text=True
+    ).stdout
+    assert before == after, f"git status changed: before={before!r} after={after!r}"
 
 
 # ============================================================
@@ -445,7 +517,12 @@ def test_suite_push_disclosure(suite_snapshot):
     disc = suite_snapshot["disclosures"]["push_status"]
     assert "c3c9b98" in disc
     assert "dc78a82" in disc
-    assert "local" in disc
+
+
+def test_suite_immutability_wording(suite_snapshot):
+    """Suite must truthfully describe the historical snapshot repair."""
+    disc = suite_snapshot["disclosures"]["push_status"]
+    assert "restored" in disc.lower() or "repair" in disc.lower()
 
 
 def test_suite_deterministic(suite_snapshot):
@@ -459,34 +536,3 @@ def test_suite_markdown_exists(suite_snapshot):
     md_text = SUITE_MD.read_text(encoding="utf-8")
     assert len(md_text) > 1000
     assert "FI-2010 Baseline Suite" in md_text
-
-
-def test_snapshot_generator_does_not_mutate_tracked_outputs():
-    """Running snapshot does not change git-tracked files."""
-    import subprocess
-    import sys
-
-    before = subprocess.run(
-        ["git", "status", "--short"], cwd=ROOT, capture_output=True, text=True
-    ).stdout
-
-    result = subprocess.run(
-        [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-
-    result2 = subprocess.run(
-        [sys.executable, "-m", "deepbook.cli.fi2010_baselines", "snapshot-suite"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result2.returncode == 0
-
-    after = subprocess.run(
-        ["git", "status", "--short"], cwd=ROOT, capture_output=True, text=True
-    ).stdout
-    assert before == after, f"git status changed: before={before!r} after={after!r}"

@@ -498,8 +498,14 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
             "push_status": (
                 "Commits c3c9b98 and dc78a82 were subsequently pushed to origin/main "
                 "despite original no-push instructions. Public history was not rewritten. "
-                "The historical snapshot (fi2010_classical_mlplob) remains immutable and "
-                "reflects its creation-time state. This DeepLOB result commit is local only."
+                "The accepted classical/MLP snapshot is preserved byte-for-byte from its "
+                "accepted historical state. Its raw-report hashes refer to the 650-run "
+                "creation-time report/index artifacts and are intentionally historical, "
+                "not hashes of the current 900-run report set. "
+                "A follow-up repair commit (fix: restore immutable FI-2010 historical "
+                "snapshot) restored the accepted bytes after the initial DeepLOB packaging "
+                "commit had accidentally modified them. "
+                "This DeepLOB result suite commit and the repair commit remain local."
             ),
             "result_commit_local_only": True,
             "no_publisher_verification": (

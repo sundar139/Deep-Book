@@ -715,8 +715,11 @@ A running manifest without a valid recoverable last-state checkpoint was quarant
 - torch: 2.13.0+cu132
 - torch_cuda: 13.2
 
-## Reconciliation Digest
+## Report Hashes
 
+- run_index.json SHA-256: `e2a77af4488eaab152d41d56ac6d7f3659948dcad20c30f2038d87db4b04bcb8`
+- Report JSON SHA-256: `7caf67c12f0c4a23ed1895b92c0e69943fdf6d7e4aa9883e369b41871f0f410e`
+- Report Markdown SHA-256: `bd5410ba7e5cae0938cd0eb682b3d79acd6e94ff8499aa9c6d80b9a76aff00f1`
 - Reconciliation digest: `62e45e3a60f831bee4ee6a2d426350f3de7b09901d91f25803144bfd4dd386cb`
 
 ## Disclosures
