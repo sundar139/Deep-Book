@@ -884,18 +884,20 @@ No machine-readable numeric published-reference table was frozen before confirma
 
 ### Push Status
 
-The DeepLOB result commit 40d77e1 was pushed to origin/main before independent review despite an explicit no-push instruction. The subsequent historical-snapshot repair commit 52fd936 and the current finalization commit remain local and have not been pushed. Public history was not rewritten. The prior push is disclosed as a workflow violation and does not alter the verified scientific results. Commits c3c9b98 and dc78a82 were also pushed to origin/main during earlier work.
+The DeepLOB result commit 40d77e1 was pushed to origin/main before independent review despite an explicit no-push instruction. The historical-snapshot repair commit 52fd936 and provenance-hardening commit 00da49d were also pushed to origin/main during later implementation work despite repeated no-push instructions. Public history was not rewritten. This final packaging commit remains local and has not been pushed. The prior pushes are disclosed as workflow violations and do not alter the verified scientific results. Commits c3c9b98 and dc78a82 were also pushed to origin/main during earlier work.
 
 #### Push Provenance
 
-- remote_main_commit: `40d77e1b762ea07a879bef6911e287f77fe23659`
+- remote_main_commit: `00da49d5a14269395cc4a737b0415edf6cb48a84`
 - deeplob_result_commit: `40d77e1b762ea07a879bef6911e287f77fe23659`
 - deeplob_result_commit_pushed: True
 - historical_snapshot_repair_commit: `52fd93653a5cd9e9e2c6826268ddf6e37f3e3433`
-- historical_snapshot_repair_commit_pushed: False
-- current_packaging_commit_pushed: False
-- public_history_rewritten: False
+- historical_snapshot_repair_commit_pushed: True
+- provenance_hardening_commit: `00da49d5a14269395cc4a737b0415edf6cb48a84`
+- provenance_hardening_commit_pushed: True
+- current_finalization_commit_pushed: False
 - prior_no_push_violation: True
+- public_history_rewritten: False
 
 ### scikit-learn Limitation
 

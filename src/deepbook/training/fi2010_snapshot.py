@@ -409,8 +409,13 @@ def _reconciliation_summary(
     }
 
 
-def build_snapshot(root: Path) -> dict[str, Any]:
-    """Build the deterministic tracked reproduction snapshot."""
+def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> dict[str, Any]:
+    """Build the deterministic tracked reproduction snapshot.
+
+    provenance_path_override: If provided, use this path instead of the
+    default tracked provenance YAML.  For testing only — the production
+    default is the tracked file.
+    """
     artifact_root = default_artifact_root(root)
     runs_dir = root / _RUNS_DIR
     manifests = _load_manifests(runs_dir)
@@ -425,7 +430,9 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     #
     # Fail loudly if the provenance file is missing or incomplete — silent
     # fallback would allow accidental mutation of the historical snapshot.
-    provenance_path = root / "configs" / "references" / "fi2010_classical_snapshot_provenance.yaml"
+    provenance_path = provenance_path_override or (
+        root / "configs" / "references" / "fi2010_classical_snapshot_provenance.yaml"
+    )
     if not provenance_path.is_file():
         raise FileNotFoundError(
             f"Historical snapshot provenance file missing: {provenance_path}. "
@@ -633,13 +640,18 @@ def build_snapshot(root: Path) -> dict[str, Any]:
     return snapshot
 
 
-def write_snapshot(root: Path, output_dir: Path | None = None) -> tuple[Path, Path]:
+def write_snapshot(
+    root: Path,
+    output_dir: Path | None = None,
+    provenance_path_override: Path | None = None,
+) -> tuple[Path, Path]:
     """Write the deterministic snapshot JSON and Markdown, return (json_path, md_path).
 
     When output_dir is None (default), writes to the tracked reproduction paths.
     When provided, writes there instead (for testing).
+    provenance_path_override: for testing only.
     """
-    snapshot = build_snapshot(root)
+    snapshot = build_snapshot(root, provenance_path_override=provenance_path_override)
 
     base = output_dir if output_dir is not None else root
     json_path = base / _OUTPUT_JSON

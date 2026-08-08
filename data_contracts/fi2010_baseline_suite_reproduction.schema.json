@@ -105,7 +105,41 @@
     "reconciliation": {"type": "object", "additionalProperties": true},
     "environment": {"type": "object", "additionalProperties": true},
     "hashes": {"type": "object", "additionalProperties": true},
-    "disclosures": {"type": "object", "additionalProperties": true},
+    "disclosures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "published_reference_note",
+        "push_status",
+        "remote_main_commit",
+        "deeplob_result_commit",
+        "deeplob_result_commit_pushed",
+        "historical_snapshot_repair_commit",
+        "historical_snapshot_repair_commit_pushed",
+        "provenance_hardening_commit",
+        "provenance_hardening_commit_pushed",
+        "current_finalization_commit_pushed",
+        "prior_no_push_violation",
+        "public_history_rewritten"
+      ],
+      "properties": {
+        "published_reference_note": {"type": "string"},
+        "push_status": {"type": "string"},
+        "remote_main_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "deeplob_result_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "deeplob_result_commit_pushed": {"type": "boolean"},
+        "historical_snapshot_repair_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "historical_snapshot_repair_commit_pushed": {"type": "boolean"},
+        "provenance_hardening_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "provenance_hardening_commit_pushed": {"type": "boolean"},
+        "current_finalization_commit_pushed": {"type": "boolean"},
+        "prior_no_push_violation": {"type": "boolean"},
+        "public_history_rewritten": {"type": "boolean"},
+        "no_publisher_verification": {"type": "string"},
+        "scikit_learn_limitation": {"type": "string"},
+        "data_audit_status": {"type": "string"}
+      }
+    },
     "limitations": {"type": "array", "items": {"type": "string"}}
   }
 }
