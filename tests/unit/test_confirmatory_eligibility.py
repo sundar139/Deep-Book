@@ -279,12 +279,14 @@ def test_run_index_reports_planned_totals_for_both_setups(tmp_path: Path) -> Non
     totals = index["planned_totals"]
     assert index["planned_cell_count"] == len(planned_run_specs(ROOT))
     assert totals["planned_by_setup"] == {
-        SETUP_ANCHORED_FORWARD: 810,
-        SETUP_FIRST_SEVEN_FINAL_THREE: 90,
+        SETUP_ANCHORED_FORWARD: 1260,
+        SETUP_FIRST_SEVEN_FINAL_THREE: 140,
     }
     assert totals["planned_by_model"]["majority"] == 50
     assert totals["planned_by_model"]["deeplob"] == 250
-    assert totals["planned_by_fold_or_day_group"]["day_group_days_8_9_10"] == 90
+    assert totals["planned_by_model"]["translob"] == 250
+    assert totals["planned_by_model"]["tlob"] == 250
+    assert totals["planned_by_fold_or_day_group"]["day_group_days_8_9_10"] == 140
     assert sorted(totals["planned_by_horizon"]) == ["h10", "h100", "h20", "h30", "h50"]
     assert len(totals["planned_by_seed"]) == 5
 

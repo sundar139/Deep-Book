@@ -337,13 +337,15 @@ def test_mismatched_bytes_detected_without_dirtying_tracked(tmp_path):
 
 
 def test_snapshot_does_not_dirty_repo():
-    """Running snapshot CLI does not change git status."""
+    """Running snapshot CLI does not change git status or tracked files."""
     import hashlib
     import subprocess
     import sys
 
     j_before = hashlib.sha256(TRACKED_JSON.read_bytes()).hexdigest()
     m_before = hashlib.sha256(TRACKED_MD.read_bytes()).hexdigest()
+    sj_before = hashlib.sha256(TRACKED_SUITE_JSON.read_bytes()).hexdigest()
+    sm_before = hashlib.sha256(TRACKED_SUITE_MD.read_bytes()).hexdigest()
 
     for cmd in ("snapshot", "snapshot-suite"):
         subprocess.run(
@@ -355,6 +357,8 @@ def test_snapshot_does_not_dirty_repo():
 
     assert hashlib.sha256(TRACKED_JSON.read_bytes()).hexdigest() == j_before
     assert hashlib.sha256(TRACKED_MD.read_bytes()).hexdigest() == m_before
+    assert hashlib.sha256(TRACKED_SUITE_JSON.read_bytes()).hexdigest() == sj_before
+    assert hashlib.sha256(TRACKED_SUITE_MD.read_bytes()).hexdigest() == sm_before
 
 
 # ============================================================

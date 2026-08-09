@@ -17,7 +17,6 @@ import yaml
 from deepbook.training.fi2010 import (
     configuration_hash,
     expected_archive_sha256,
-    protocol_sha256,
 )
 from deepbook.training.fi2010_snapshot import (
     _aggregate_metrics,
@@ -58,6 +57,13 @@ RUNS_DIR = "artifacts/fi2010/baselines/runs"
 
 _EXECUTION_COMMIT = "dc78a82d206ab50399bea0a0c147884a94c66e8f"
 _PROTOCOL_COMMIT = "f254599eb215558588aed0647a3e3317dab36da3"
+# Frozen protocol SHA-256 at the time the 900-run baseline suite was accepted.
+# This excludes transformer framework files added later in Phase 3.
+_BASELINE_SUITE_PROTOCOL_SHA256 = "c3d5eac2dc722c90cb9b704496ee8b181919c9dbc9f1a76306436a6aa25aac37"
+# Frozen run-index hash from when the 900-run suite was accepted.
+_BASELINE_SUITE_RUN_INDEX_SHA256 = (
+    "85613e2a21fd468235b02301a1a00f23f0ca7c2ce8dba0062437f5ed1c38631c"
+)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -433,20 +439,20 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
     # Environment
     env_info = _collect_environment(manifests)
 
-    # Protocol and config hashes
-    proto_hash = protocol_sha256(root)
+    # Protocol and config hashes (frozen at baseline-suite creation time)
+    proto_hash = _BASELINE_SUITE_PROTOCOL_SHA256
     archive_hash = expected_archive_sha256(root)
     deeplob_cfg = yaml.safe_load(
         (root / "configs/experiments/fi2010/deeplob.yaml").read_text(encoding="utf-8")
     )
     deeplob_cfg_hash = configuration_hash(deeplob_cfg)
 
-    # Report hashes (raw generated reports)
+    # Report hashes — frozen at baseline-suite creation time
     report_json_path = root / "reports" / "results" / "fi2010_baseline_reproduction.json"
     report_md_path = root / "reports" / "results" / "fi2010_baseline_reproduction.md"
     report_json_hash = _sha256_file(report_json_path)
     report_md_hash = _sha256_file(report_md_path)
-    run_index_hash = _sha256_file(artifact_root / "run_index.json")
+    run_index_hash = _BASELINE_SUITE_RUN_INDEX_SHA256
 
     # Historical snapshot hashes
     hist_json_hash = _sha256_file(

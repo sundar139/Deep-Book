@@ -26,6 +26,11 @@ _PROTOCOL_CONTRACT_PATHS = (
     "configs/experiments/fi2010/classical.yaml",
     "configs/experiments/fi2010/mlplob.yaml",
     "configs/experiments/fi2010/deeplob.yaml",
+    "configs/experiments/fi2010/translob.yaml",
+    "configs/experiments/fi2010/tlob.yaml",
+    "configs/references/translob_fi2010.yaml",
+    "configs/references/tlob_fi2010.yaml",
+    "reports/protocol/fi2010_transformer_architecture_freeze.md",
 )
 
 FROZEN_DATA_IDENTITY_PATH = "configs/references/fi2010_frozen_data_identity.yaml"

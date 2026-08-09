@@ -87,8 +87,16 @@
       "type": "boolean"
     },
     "model": {
-      "type": "string",
-      "minLength": 1
+      "enum": [
+        "majority",
+        "causal_persistence",
+        "logistic_current_event",
+        "random_forest",
+        "mlplob",
+        "deeplob",
+        "translob",
+        "tlob"
+      ]
     },
     "setup": {
       "enum": [
@@ -432,7 +440,7 @@
       "$comment": "Completed neural runs need best-checkpoint and epoch provenance.",
       "if": {
         "properties": {
-          "model": {"enum": ["mlplob", "deeplob"]},
+          "model": {"enum": ["mlplob", "deeplob", "translob", "tlob"]},
           "status": {"const": "completed"}
         },
         "required": ["model", "status"]

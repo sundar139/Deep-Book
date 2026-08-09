@@ -1,0 +1,73 @@
+schema_version: 1
+experiment_name: fi2010_translob
+source_config: configs/data/fi2010.yaml
+protocol_document: reports/protocol/fi2010_transformer_architecture_freeze.md
+source_reference: configs/references/translob_fi2010.yaml
+benchmark_variant: no_auction
+normalization: zscore
+input_rows: 40
+input_shape: [1, 100, 40]
+input_representation: raw_lob_window
+sequence_length: 100
+horizons: [10, 20, 30, 50, 100]
+labels: official_supplied
+alternative_labeling: excluded
+class_order: [up, stationary, down]
+seeds: [1337, 2027, 31415, 424242, 8675309]
+model:
+  convolution_channels: 14
+  convolution_kernel: 2
+  convolution_dilations: [1, 2, 4, 8, 16]
+  convolution_layers: 5
+  convolution_activation: relu
+  positional_encoding: linear_minus_one_to_one
+  transformer_model_dimension: 15
+  attention_heads: 3
+  transformer_blocks: 2
+  shared_transformer_weights: true
+  masked_attention: true
+  feedforward_multiplier: 4
+  feedforward_activation: relu
+  internal_dropout: 0.0
+  classifier_hidden_dimension: 64
+  dropout: 0.1
+  output_logits: 3
+training:
+  loss: cross_entropy
+  optimizer: adam
+  learning_rate: 0.0001
+  batch_size: 32
+  max_epochs: 150
+  early_stopping_metric: validation_macro_f1
+  patience: 10
+  class_weights: null
+  mixed_precision: false
+  gradient_clipping: null
+  scheduler: null
+validation:
+  policy: chronological_training_only
+  purge_events: 200
+  embargo_events: 200
+  normalization_fit: training_only
+checkpointing:
+  best_metric: validation_macro_f1
+  final_evaluation_checkpoint: best
+  persist_last_state: true
+determinism:
+  seed_policy: five_frozen_seeds
+  deterministic_algorithms: true
+  cudnn_deterministic: true
+  cudnn_benchmark: false
+setups:
+  anchored_forward:
+    folds: 9
+    train_days: cumulative
+    test_day: fold_plus_one
+  first_seven_final_three:
+    day_group: days_8_9_10
+    train_days: [1, 2, 3, 4, 5, 6, 7]
+    test_days: [8, 9, 10]
+outputs:
+  run_kind_smoke: smoke
+  smoke_eligible_for_confirmatory_report: false
+  ignored_root: artifacts/fi2010/baselines

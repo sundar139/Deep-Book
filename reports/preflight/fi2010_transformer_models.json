@@ -1,0 +1,125 @@
+{
+  "eligible_for_confirmatory_report": false,
+  "note": "All evidence in this artifact is diagnostic only. No confirmatory runs, production checkpoints, or production predictions exist. Timing and memory measurements are hardware/run dependent and not scientific acceptance metrics.",
+  "run_kind": "smoke/preflight",
+  "schema_version": 1,
+  "title": "FI-2010 Transformer Models — Preflight Evidence",
+  "tlob": {
+    "architecture": {
+      "backward_passed": true,
+      "forward_passed": true,
+      "input_shape": [
+        2,
+        1,
+        100,
+        40
+      ],
+      "model": "tlob",
+      "nonzero_gradient": true,
+      "output_shape": [
+        2,
+        3
+      ],
+      "parameter_count": 734478
+    },
+    "cuda": {
+      "cuda_available": true,
+      "forward_backward_cuda_passed": true,
+      "gpu_model": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "model": "tlob",
+      "nonzero_gradient_cuda": true,
+      "note": "diagnostic only — hardware/run dependent — not a scientific acceptance metric",
+      "peak_gpu_memory_bytes": 26408960
+    },
+    "resume": {
+      "interrupted_epoch": 2,
+      "max_parameter_delta": 0.0,
+      "model": "tlob",
+      "note": "architecture freeze preflight — full resume determinism requires production-scale data",
+      "optimizer_state_match": true,
+      "pass_fail": "pass",
+      "prediction_match": true,
+      "resume_target_epoch": 3,
+      "uninterrupted_epochs": 3
+    },
+    "throughput": {
+      "batch_size": 32,
+      "inference_latency_ms": 0.734,
+      "model": "tlob",
+      "note": "diagnostic only — hardware/run dependent — not a scientific acceptance metric",
+      "samples_per_second": 1363
+    },
+    "tiny_overfit": {
+      "batch_size": 8,
+      "diagnostic_only": true,
+      "final_accuracy": 1.0,
+      "final_loss": 0.0004636024823412299,
+      "initial_accuracy": 0.625,
+      "initial_loss": 1.0691826343536377,
+      "learning_rate": 0.001,
+      "max_epochs": 50,
+      "model": "tlob",
+      "note": "diagnostic only — tiny-batch overfit verifies model can learn, not production performance",
+      "pass_fail": "pass"
+    }
+  },
+  "translob": {
+    "architecture": {
+      "backward_passed": true,
+      "forward_passed": true,
+      "input_shape": [
+        2,
+        1,
+        100,
+        40
+      ],
+      "model": "translob",
+      "nonzero_gradient": true,
+      "output_shape": [
+        2,
+        3
+      ],
+      "parameter_count": 101895
+    },
+    "cuda": {
+      "cuda_available": true,
+      "forward_backward_cuda_passed": true,
+      "gpu_model": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "model": "translob",
+      "nonzero_gradient_cuda": true,
+      "note": "diagnostic only — hardware/run dependent — not a scientific acceptance metric",
+      "peak_gpu_memory_bytes": 19464704
+    },
+    "resume": {
+      "interrupted_epoch": 2,
+      "max_parameter_delta": 0.0,
+      "model": "translob",
+      "note": "architecture freeze preflight — full resume determinism requires production-scale data",
+      "optimizer_state_match": true,
+      "pass_fail": "pass",
+      "prediction_match": true,
+      "resume_target_epoch": 3,
+      "uninterrupted_epochs": 3
+    },
+    "throughput": {
+      "batch_size": 32,
+      "inference_latency_ms": 0.164,
+      "model": "translob",
+      "note": "diagnostic only — hardware/run dependent — not a scientific acceptance metric",
+      "samples_per_second": 6094
+    },
+    "tiny_overfit": {
+      "batch_size": 8,
+      "diagnostic_only": true,
+      "final_accuracy": 1.0,
+      "final_loss": 1.3038341421633959e-05,
+      "initial_accuracy": 0.625,
+      "initial_loss": 1.186334252357483,
+      "learning_rate": 0.001,
+      "max_epochs": 50,
+      "model": "translob",
+      "note": "diagnostic only — tiny-batch overfit verifies model can learn, not production performance",
+      "pass_fail": "pass"
+    }
+  }
+}

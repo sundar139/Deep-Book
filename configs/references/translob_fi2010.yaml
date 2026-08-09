@@ -1,0 +1,76 @@
+schema_version: 1
+model: translob
+paper:
+  title: "Transformers for Limit Order Books"
+  authors: ["James Wallbridge"]
+  arxiv: "arXiv:2003.00130v1"
+  version_date: "2020-02-29"
+  pdf_sha256: cfded3759a753e82c070102e0be7fed9d5390cdcd786ab7dfc41bfdbcd736caf
+  url: "https://arxiv.org/abs/2003.00130"
+repository:
+  url: "https://github.com/jwallbridge/translob"
+  inspected_revision: 54d73260560cae4282b5effbff7c4f2158e62c08
+  inspected_revision_label: master
+  audit_date: "2026-08-08"
+  files:
+    - path: README.md
+      sha256: 2c0391af80c0157724daa0a399513a1eb0daaeb66fd6d95ea1309044047e1911
+    - path: python/LobFeatures.py
+      sha256: 37bf5edb6182267f2339f52dee1e82da7edb08331b558a9c321f0bd001e00578
+    - path: python/LobAttention.py
+      sha256: 1e94100f499959971f9818039bc26e8beac6992365598124d59cd8e08f987d78
+    - path: python/LobPosition.py
+      sha256: 12911c4781383824b39ac56e7ac994987bc0de7edeb8da33c68686220a14001f
+    - path: python/LobTransformer.py
+      sha256: 91afd42ddb4c95017208de61fdafb829f478ba331acdbf3fb3e09141cc48770e
+findings:
+  input: "[100, 40]; five causal Conv1D layers over normalized raw FI-2010 LOB rows"
+  convolution: {features: 14, kernel: 2, dilations: [1, 2, 4, 8, 16], activation: relu}
+  positional_encoding: "linear coordinate from -1 to 1 appended after LayerNorm"
+  transformer: {model_dimension: 15, heads: 3, blocks: 2, shared_weights: true, masked_attention: true, feedforward_dimension: 60, feedforward_activation: relu, internal_dropout: 0.0}
+  classifier: {hidden_dimension: 64, activation: relu, dropout: 0.1, output_classes: 3}
+  training: {optimizer: Adam, learning_rate: 0.0001, batch_size: 32, max_epochs: 150}
+  labels: "official FI-2010 labels with threshold 0.002; source horizons [10, 20, 50, 100]"
+  normalization: "prior-day mean and standard deviation in the source README"
+classifications:
+  input_representation: EXACT_SOURCE
+  sequence_length: EXACT_SOURCE
+  feature_count: EXACT_SOURCE
+  convolution: EXACT_SOURCE
+  dilation: EXACT_SOURCE
+  normalization: EXACT_SOURCE
+  positional_encoding: DERIVED_FROM_SOURCE_CODE
+  transformer_dimensions: EXACT_SOURCE
+  masked_attention: EXACT_SOURCE
+  shared_weights: EXACT_SOURCE
+  classifier: EXACT_SOURCE
+  optimizer: EXACT_SOURCE
+  batch_size: EXACT_SOURCE
+  epochs: EXACT_SOURCE
+  validation_and_patience: NOT_SPECIFIED
+  initialization: DERIVED_FROM_SOURCE_CODE
+ambiguities:
+  - field: attention_output_projection
+    source_status: AMBIGUOUS_SOURCE_CONFLICT
+    finding: "paper specifies a learned W_O in MultiHead(X)=concat(heads)W^O; official repository attention module omits the output projection"
+    frozen_interpretation: "paper-defined learned output projection is retained in the DeepBook translation"
+  - field: qkv_bias
+    source_status: RESOLVED
+    finding: "official repository QKV uses a bare weight matrix with no bias; DeepBook initially used nn.Linear with bias=True"
+    frozen_interpretation: "QKV bias set to False to align with the authoritative repository"
+  - field: dense64_l2_regularization
+    source_status: AMBIGUOUS_SOURCE_ADAPTATION
+    finding: "paper specifies L2 regularization on the dense-64 classifier layer; the exact coefficient is not recoverable from the paper or repository"
+    frozen_interpretation: "L2 regularization on dense-64 is intentionally omitted rather than guessing a coefficient; classified as an intentional source-ambiguity adaptation to be controlled before production execution"
+  - field: source_assembly
+    source_status: AMBIGUOUS
+    finding: "official repository supplies modules but not one complete training model"
+    frozen_interpretation: "modules are assembled according to the paper architecture and common DeepBook runner"
+adaptations:
+  - "QKV bias removed to match official repository (bias=False)"
+  - "current DeepBook keeps the supplied five official label horizons, including 30"
+  - "current DeepBook keeps 100-event windows and 40 raw LOB rows"
+  - "logits are returned for CrossEntropyLoss; softmax is evaluation-only"
+  - "chronological validation, purge, embargo, checkpointing, deterministic seeds, and full metrics use DeepBook infrastructure"
+  - "source horizon set [10, 20, 50, 100] is contextual only and is not mixed with the controlled matrix"
+  - "L2 regularization on dense-64 classifier omitted (coefficient not recoverable from authoritative sources)"

@@ -1,0 +1,81 @@
+schema_version: 1
+model: tlob
+paper:
+  title: "TLOB: A Novel Transformer Model with Dual Attention for Stock Price Trend Prediction with Limit Order Book Data"
+  authors: ["Leonardo Berti", "Gjergji Kasneci"]
+  arxiv: "arXiv:2502.15757v3"
+  version_date: "2025-05-07"
+  pdf_sha256: da90d24cfcc7a0074187fd7d2c6d27c4a7ffbcc86cece5dd4d5ba12901e2e03b
+  url: "https://arxiv.org/abs/2502.15757"
+repository:
+  url: "https://github.com/LeonardoBerti00/TLOB"
+  inspected_revision: f1c0af4d81067978914361766db0457a7d8b6a46
+  inspected_revision_label: main
+  audit_date: "2026-08-08"
+  files:
+    - path: README.md
+      sha256: f865546acb66aadf9667fd624285b83b5966446793cd04423ea8ff44f521a248
+    - path: config/config.py
+      sha256: 3b14ee43f6114c01e2f092c474a0107a7ffd2cd5aa5dd3da7f2b116a7f37c110
+    - path: models/tlob.py
+      sha256: 607e69dac8e87f978cbec338db612437ebd3b097e79bca0064fee166d347c55e
+    - path: models/engine.py
+      sha256: 3ce9779fd0216341d738130ee64896564a079889aa2fcbd448f7f2112ca57c94
+    - path: models/mlplob.py
+      sha256: dbd518a3757bc56f90de96a0b89ec45e1c2c146de29b813efa784430f212ac61
+    - path: models/bin.py
+      sha256: 1efd98dbad2a40612879b3148ef7bf534b2b100ce95d671f13dd3de91684807d
+    - path: utils/attention.py
+      sha256: c685bb6982d7b368adcea01e629a4078bf2eb3a8dd777f3323f2f54fa55354c9
+    - path: preprocessing/fi_2010.py
+      sha256: 4d8b55bfb6c29416f1b6a7e9595b0feff9dc967ed67acfab17d5d9d6055ab16e
+    - path: preprocessing/dataset.py
+      sha256: eadb2dc867e8e739f70a2cbbf65282121082a2bb699d93bd5ee7f979b8a99e38
+findings:
+  input: "official FI-2010 preprocessing exposes 144 features when all_features=true and 40 raw LOB features otherwise"
+  source_configuration: {hidden_dim: 40, num_layers: 4, num_heads: 1, is_sin_emb: true, learning_rate: 0.0001, sequence_length: 128, all_features: true, batch_size: 32, max_epochs: 10, optimizer: Adam}
+  normalization: "Bilinear Normalization before projection"
+  block_order: "temporal self-attention (with internal FFN), spatial self-attention (with internal FFN) — TransformerLayer internalises the MLP; there is no separate MLPLOB block appended per layer"
+  temporal_attention: "self-attention over the snapshot axis"
+  spatial_attention: "self-attention over the feature axis"
+  dimensions: "final temporal and spatial blocks reduce hidden and sequence dimensions by four"
+  classifier: "flatten followed by repeated quarter-width Linear/GELU layers while width exceeds 128, then three logits"
+  labels: "paper retains original FI-2010 labels; repository also implements an alternative horizon-unbiased method"
+  source_horizons: [10, 20, 50, 100]
+classifications:
+  input_representation: DERIVED_FROM_SOURCE_CODE
+  sequence_length: EXACT_SOURCE
+  feature_count: DERIVED_FROM_SOURCE_CODE
+  hidden_dimension: EXACT_SOURCE
+  attention_axes: EXACT_SOURCE
+  block_order: EXACT_SOURCE
+  layer_count: EXACT_SOURCE
+  normalization: DERIVED_FROM_SOURCE_CODE
+  positional_encoding: DERIVED_FROM_SOURCE_CODE
+  classifier: DERIVED_FROM_SOURCE_CODE
+  optimizer: EXACT_SOURCE
+  learning_rate: EXACT_SOURCE
+  batch_size: EXACT_SOURCE
+  epoch_limit: EXACT_SOURCE
+  patience: NOT_SPECIFIED
+  scheduler: DERIVED_FROM_SOURCE_CODE
+  initialization: DERIVED_FROM_SOURCE_CODE
+ambiguities:
+  - field: FI2010_feature_mode
+    source_status: AMBIGUOUS
+    finding: "paper experiments use 104 handcrafted features, while the repository default also sets all_features=true"
+    frozen_interpretation: "controlled DeepBook comparison uses the existing 40 raw LOB rows; no loader or label change"
+  - field: sequence_length
+    source_status: AMBIGUOUS
+    finding: "official configuration uses 128 while the controlled DeepBook windows are fixed at 100"
+    frozen_interpretation: "model-side sequence length is 100 for apples-to-apples comparison"
+  - field: alternative_labels
+    source_status: AMBIGUOUS
+    finding: "repository provides horizon-unbiased labeling absent from the accepted DeepBook contract"
+    frozen_interpretation: "alternative labels are excluded and recorded only as a future ablation"
+adaptations:
+  - "input uses existing [batch, 1, 100, 40] DeepBook windows and the source book-only hidden_dim=40 interpretation"
+  - "the source order-type embedding is not used because FI-2010 has no LOBSTER order-type column"
+  - "sinusoidal encoding is registered as a non-trainable buffer for deterministic device moves"
+  - "Bilinear Normalization zero-variance protection uses clamp_min(1e-4), replacing source in-place replacement with a device-safe operation"
+  - "DeepBook validation, purge, embargo, checkpoints, deterministic seeds, and metrics use the shared runner"

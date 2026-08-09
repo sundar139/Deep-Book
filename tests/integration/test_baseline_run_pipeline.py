@@ -59,10 +59,15 @@ TRACKED_INPUTS = (
     "configs/data/fi2010.yaml",
     "configs/references/fi2010_frozen_data_identity.yaml",
     "configs/references/deeplob_fi2010.yaml",
+    "configs/references/translob_fi2010.yaml",
+    "configs/references/tlob_fi2010.yaml",
     "configs/experiments/fi2010/classical.yaml",
     "configs/experiments/fi2010/mlplob.yaml",
     "configs/experiments/fi2010/deeplob.yaml",
+    "configs/experiments/fi2010/translob.yaml",
+    "configs/experiments/fi2010/tlob.yaml",
     "reports/protocol/fi2010_baseline_reproduction.md",
+    "reports/protocol/fi2010_transformer_architecture_freeze.md",
 )
 
 
@@ -257,9 +262,12 @@ class TestProductionOrchestration:
         assert report["confirmatory_runs"] == []
         assert [m["run_id"] for m in report["smoke_runs"]] == [spec.run_id]
 
-    def test_tiny_neural_run_writes_best_and_last_checkpoints(self, synthetic_root: Path) -> None:
+    @pytest.mark.parametrize("model", ["mlplob", "translob", "tlob"])
+    def test_tiny_neural_run_writes_best_and_last_checkpoints(
+        self, synthetic_root: Path, model: str
+    ) -> None:
         artifacts = synthetic_root / "artifacts" / "fi2010" / "baselines"
-        spec = RunSpec(model="mlplob", setup=SETUP_ANCHORED_FORWARD, horizon=10, seed=1337, fold=1)
+        spec = RunSpec(model=model, setup=SETUP_ANCHORED_FORWARD, horizon=10, seed=1337, fold=1)
         manifest = execute_run(
             synthetic_root,
             spec,
@@ -268,7 +276,7 @@ class TestProductionOrchestration:
             smoke=True,
             run_data_provider=_provider(synthetic_root, observations=2400, test_observations=400),
         )
-        assert manifest["model"] == "mlplob"
+        assert manifest["model"] == model
         assert manifest["termination_reason"] in {"early_stopping", "max_epochs"}
         assert 1 <= manifest["actual_epochs_completed"] <= manifest["configured_max_epochs"]
         assert 1 <= manifest["best_epoch"] <= manifest["actual_epochs_completed"]
@@ -316,7 +324,7 @@ class TestProductionOrchestration:
         assert _cmd_report(synthetic_root) == 0
         assert index_path.is_file()
         payload = json.loads(index_path.read_text(encoding="utf-8"))
-        assert payload["planned_cell_count"] == 900
+        assert payload["planned_cell_count"] == 1400
 
     def test_report_artifacts_are_byte_identical_across_unchanged_runs(
         self, synthetic_root: Path

@@ -20,10 +20,11 @@ def tiny_batch_overfit_gate(
     seed: int,
     steps: int = 50,
     threshold: float = 0.9,
+    learning_rate: float = 1e-2,
 ) -> dict[str, Any]:
     """Require a fresh model to memorize a tiny deterministic three-class batch."""
-    if steps <= 0 or not 0.0 < threshold <= 1.0:
-        raise ValueError("steps must be positive and threshold must be in (0,1]")
+    if steps <= 0 or not 0.0 < threshold <= 1.0 or learning_rate <= 0.0:
+        raise ValueError("steps, threshold, and learning_rate must be positive")
     seed_everything(seed)
     target_device = torch.device(device)
     if target_device.type == "cuda" and not torch.cuda.is_available():
@@ -32,7 +33,7 @@ def tiny_batch_overfit_gate(
     features = torch.randn((9, 1, input_shape[0], input_shape[1]), generator=generator)
     labels = torch.arange(9, dtype=torch.long) % 3
     model = model_factory().to(target_device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     started = time.perf_counter()
     model.train()
     initial_loss = float("nan")

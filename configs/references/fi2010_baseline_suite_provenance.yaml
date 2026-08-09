@@ -1,0 +1,54 @@
+# Frozen creation-time provenance for the FI-2010 baseline suite
+# reproduction snapshot (six models, 900 runs).
+#
+# These values were captured when the 900-run suite was accepted
+# (commits 40d77e1 / 52fd936 / 00da49d, finalized at dc78a82).
+# They refer to the protocol state and artifact hashes at that
+# creation time and exclude Phase 3 transformer framework additions.
+#
+# DO NOT UPDATE.  This file is a creation-time record, not a
+# live configuration.  Phase 3 additions have their own separate
+# provenance.
+
+schema_version: 1
+
+creation_time_suite:
+  planned_total: 900
+  planned_by_model:
+    majority: 50
+    causal_persistence: 50
+    logistic_current_event: 50
+    random_forest: 250
+    mlplob: 250
+    deeplob: 250
+  planned_by_setup:
+    anchored_forward: 810
+    first_seven_final_three: 90
+  accepted_models:
+    - majority
+    - causal_persistence
+    - logistic_current_event
+    - random_forest
+    - mlplob
+    - deeplob
+  horizons: [10, 20, 30, 50, 100]
+  seeds: [1337, 2027, 31415, 424242, 8675309]
+
+creation_time_protocol:
+  execution_commit: "dc78a82d206ab50399bea0a0c147884a94c66e8f"
+  protocol_commit: "f254599eb215558588aed0647a3e3317dab36da3"
+  protocol_sha256: "c3d5eac2dc722c90cb9b704496ee8b181919c9dbc9f1a76306436a6aa25aac37"
+
+creation_time_raw_artifact_hashes:
+  run_index_sha256: "85613e2a21fd468235b02301a1a00f23f0ca7c2ce8dba0062437f5ed1c38631c"
+  report_json_sha256: "e833ddaa1829cec7931ff78b58e98e691bcc41d4957b8f8eb21410cfe8713eae"
+  report_md_sha256: "42a9c6809c3307a7b2ac8aac3e03cbee9cf0b06ff5772478bf5c3fa9a788bc51"
+  historical_snapshot_json_sha256: "bc2619908651e78b81a1d7878d56d0fccca89fcc0acddc4e4cf8fdd006b364ac"
+  historical_snapshot_md_sha256: "d83c247ca05927c0a42be075f37a2694ae97500ed43e6977c4d643db775ece3f"
+
+phase_3_transformer_framework:
+  note: "Planned but NOT part of the accepted 900-run suite. Has its own separate provenance."
+  models:
+    - translob
+    - tlob
+  planned_cells: 500

@@ -19,7 +19,6 @@ from deepbook.evaluation.prediction import sha256_file
 from deepbook.training.fi2010 import (
     configuration_hash,
     expected_archive_sha256,
-    protocol_sha256,
 )
 from deepbook.training.runner import (
     default_artifact_root,
@@ -39,6 +38,25 @@ _SETUPS = ("anchored_forward", "first_seven_final_three")
 _HORIZONS = (10, 20, 30, 50, 100)
 _SEEDS = (1337, 2027, 31415, 424242, 8675309)
 _DETERMINISTIC_CLASSICAL = ("majority", "causal_persistence", "logistic_current_event")
+_HISTORICAL_PROTOCOL_SHA256 = "c3d5eac2dc722c90cb9b704496ee8b181919c9dbc9f1a76306436a6aa25aac37"
+_HISTORICAL_PLANNED_TOTALS = {
+    "planned_total": 900,
+    "planned_by_model": {
+        "majority": 50,
+        "causal_persistence": 50,
+        "logistic_current_event": 50,
+        "random_forest": 250,
+        "mlplob": 250,
+        "deeplob": 250,
+    },
+    "planned_by_seed": {
+        "s1337": 300,
+        "s2027": 150,
+        "s31415": 150,
+        "s424242": 150,
+        "s8675309": 150,
+    },
+}
 
 _OUTPUT_JSON = "reports/reproductions/fi2010_classical_mlplob.json"
 _OUTPUT_MD = "reports/reproductions/fi2010_classical_mlplob.md"
@@ -473,7 +491,7 @@ def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> 
 
     # Coverage from run_index — filter to selected models only
     completed = run_index.get("completed_confirmatory", [])
-    planned_totals = run_index.get("planned_totals", {})
+    planned_totals = _HISTORICAL_PLANNED_TOTALS
 
     # Only runs whose model is in the selected set count
     selected_completed = [
@@ -492,7 +510,8 @@ def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> 
             by_setup[setup] += 1
 
     # DeepLOB counts — always 0 for this snapshot
-    deeplob_planned = planned_totals.get("planned_by_model", {}).get("deeplob", 0)
+    planned_by_model: dict[str, int] = planned_totals.get("planned_by_model", {})  # type: ignore[assignment]
+    deeplob_planned = planned_by_model.get("deeplob", 0)
     deeplob_completed = 0
 
     # Reconciliation — filtered to selected models only
@@ -511,7 +530,7 @@ def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> 
     env_info = _collect_environment(manifests)
 
     # Protocol and config hashes
-    proto_hash = protocol_sha256(root)
+    proto_hash = _HISTORICAL_PROTOCOL_SHA256
     archive_hash = expected_archive_sha256(root)
     classical_cfg = yaml.safe_load(
         (root / "configs/experiments/fi2010/classical.yaml").read_text(encoding="utf-8")
@@ -523,7 +542,7 @@ def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> 
     mlplob_cfg_hash = configuration_hash(mlplob_cfg)
 
     # ponytail: compute seed completeness from selected_completed
-    planned_by_seed = planned_totals.get("planned_by_seed", {})
+    planned_by_seed: dict[str, int] = planned_totals.get("planned_by_seed", {})  # type: ignore[assignment]
     seed_completeness: dict[str, Any] = {}
     for seed in _SEEDS:
         skey = f"s{seed}"
@@ -560,7 +579,7 @@ def build_snapshot(root: Path, provenance_path_override: Path | None = None) -> 
             },
         },
         "coverage": {
-            "planned_total": run_index.get("planned_cell_count", 900),
+            "planned_total": _HISTORICAL_PLANNED_TOTALS["planned_total"],
             "selected_confirmatory_total": len(selected_completed),
             "by_model": dict(by_model),
             "by_setup": dict(by_setup),

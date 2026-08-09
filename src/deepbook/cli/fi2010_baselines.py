@@ -71,7 +71,7 @@ def _cmd_report(root: Path) -> int:
     return 0
 
 
-_NEURAL_MODELS = {"mlplob", "deeplob"}
+_NEURAL_MODELS = {"mlplob", "deeplob", "translob", "tlob"}
 _REQUIRED_METRIC_KEYS = frozenset(
     {
         "macro_f1",

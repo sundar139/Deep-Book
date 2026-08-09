@@ -70,6 +70,8 @@ def test_planned_matrix_has_both_setups_with_model_specific_seeds() -> None:
         "random_forest",
         "mlplob",
         "deeplob",
+        "translob",
+        "tlob",
     ):
         seeds = len(_seeds_for_model(model))
         model_specs = [spec for spec in specs if spec.model == model]
@@ -80,15 +82,15 @@ def test_planned_matrix_has_both_setups_with_model_specific_seeds() -> None:
         expected_total += len(setup_one) + len(setup_two)
 
     assert len(specs) == expected_total
-    assert len(specs) == 900
-    assert by_setup[SETUP_ANCHORED_FORWARD] == 810
-    assert by_setup[SETUP_FIRST_SEVEN_FINAL_THREE] == 90
+    assert len(specs) == 1400
+    assert by_setup[SETUP_ANCHORED_FORWARD] == 1260
+    assert by_setup[SETUP_FIRST_SEVEN_FINAL_THREE] == 140
 
 
 def test_deterministic_classical_models_plan_one_seed_only() -> None:
     for model in ("majority", "causal_persistence", "logistic_current_event"):
         assert _seeds_for_model(model) == (1337,)
-    for model in ("random_forest", "mlplob", "deeplob"):
+    for model in ("random_forest", "mlplob", "deeplob", "translob", "tlob"):
         assert len(_seeds_for_model(model)) == 5
 
 

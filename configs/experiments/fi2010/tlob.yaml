@@ -1,0 +1,77 @@
+schema_version: 1
+experiment_name: fi2010_tlob
+source_config: configs/data/fi2010.yaml
+protocol_document: reports/protocol/fi2010_transformer_architecture_freeze.md
+source_reference: configs/references/tlob_fi2010.yaml
+benchmark_variant: no_auction
+normalization: zscore
+input_rows: 40
+input_shape: [1, 100, 40]
+input_representation: raw_lob_window_book_only
+sequence_length: 100
+source_sequence_length: 128
+horizons: [10, 20, 30, 50, 100]
+labels: official_supplied
+alternative_labeling: excluded
+class_order: [up, stationary, down]
+seeds: [1337, 2027, 31415, 424242, 8675309]
+model:
+  all_features: false
+  hidden_dim: 40
+  num_layers: 4
+  num_heads: 1
+  is_sin_emb: true
+  temporal_attention: true
+  spatial_attention: true
+  attention_order: [temporal, spatial]
+  mlplob_feedforward: true
+  mlp_expansion: 4
+  final_dimension_reduction: 4
+  output_logits: 3
+training:
+  loss: cross_entropy
+  optimizer: adam
+  learning_rate: 0.0001
+  batch_size: 32
+  max_epochs: 10
+  early_stopping_metric: validation_macro_f1
+  patience: 10
+  class_weights: null
+  mixed_precision: false
+  gradient_clipping: null
+  scheduler: null
+validation:
+  policy: chronological_training_only
+  purge_events: 200
+  embargo_events: 200
+  normalization_fit: training_only
+checkpointing:
+  best_metric: validation_macro_f1
+  final_evaluation_checkpoint: best
+  persist_last_state: true
+determinism:
+  seed_policy: five_frozen_seeds
+  deterministic_algorithms: true
+  cudnn_deterministic: true
+  cudnn_benchmark: false
+setups:
+  anchored_forward:
+    folds: 9
+    train_days: cumulative
+    test_day: fold_plus_one
+  first_seven_final_three:
+    day_group: days_8_9_10
+    train_days: [1, 2, 3, 4, 5, 6, 7]
+    test_days: [8, 9, 10]
+outputs:
+  run_kind_smoke: smoke
+  smoke_eligible_for_confirmatory_report: false
+  ignored_root: artifacts/fi2010/baselines
+
+# Diagnostic preflight values — NOT production/training hyperparameters.
+# The frozen production LR is 1e-4 (Adam, batch 32, epochs 10).
+preflight:
+  tiny_overfit:
+    learning_rate: 0.001
+    diagnostic_only: true
+    note: "1e-3 used exclusively for tiny-batch overfit diagnostics. Must never be inherited by confirmatory matrix training."

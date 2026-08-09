@@ -36,6 +36,8 @@ from deepbook.models.classical import (
 )
 from deepbook.models.deeplob import DeepLOB, parameter_count
 from deepbook.models.mlplob import MLPLOB
+from deepbook.models.tlob import TLOB
+from deepbook.models.translob import TransLOB
 from deepbook.training.data import labels_for_horizon, load_day_group, load_fold
 from deepbook.training.fi2010 import (
     DAY_GROUP_FIRST_SEVEN_FINAL_THREE,
@@ -65,7 +67,7 @@ HORIZONS = (10, 20, 30, 50, 100)
 SEEDS = (1337, 2027, 31415, 424242, 8675309)
 CLASSICAL_MODELS = ("majority", "causal_persistence", "logistic_current_event", "random_forest")
 _DETERMINISTIC_CLASSICAL_MODELS = ("majority", "causal_persistence", "logistic_current_event")
-_NEURAL_MODELS = ("mlplob", "deeplob")
+_NEURAL_MODELS = ("mlplob", "deeplob", "translob", "tlob")
 ALL_MODELS = CLASSICAL_MODELS + _NEURAL_MODELS
 SETUPS = (SETUP_ANCHORED_FORWARD, SETUP_FIRST_SEVEN_FINAL_THREE)
 CLASS_ORDER = ["up", "stationary", "down"]
@@ -1243,8 +1245,27 @@ def _run_neural(
             input_shape=(sequence_length, 40),
             hidden_sizes=tuple(int(size) for size in config["model"]["hidden_sizes"]),
         )
-    else:
+    elif spec.model == "deeplob":
         model = DeepLOB()
+    elif spec.model == "translob":
+        model = TransLOB(
+            input_features=int(config["input_rows"]),
+            sequence_length=sequence_length,
+            convolution_channels=int(config["model"]["convolution_channels"]),
+            attention_heads=int(config["model"]["attention_heads"]),
+            transformer_blocks=int(config["model"]["transformer_blocks"]),
+            feedforward_multiplier=int(config["model"]["feedforward_multiplier"]),
+            dropout=float(config["model"]["dropout"]),
+        )
+    else:
+        model = TLOB(
+            input_features=int(config["input_rows"]),
+            sequence_length=sequence_length,
+            hidden_dim=int(config["model"]["hidden_dim"]),
+            num_layers=int(config["model"]["num_layers"]),
+            num_heads=int(config["model"]["num_heads"]),
+            is_sin_emb=bool(config["model"]["is_sin_emb"]),
+        )
 
     tiny_gate: dict[str, Any] = {"status": "not_run"}
     if spec.fold == 1 and spec.horizon == 10 and spec.seed == SEEDS[0]:
@@ -1256,10 +1277,38 @@ def _run_neural(
                     input_shape=(sequence_length, 40),
                     hidden_sizes=tuple(int(size) for size in config["model"]["hidden_sizes"]),
                 )
-        else:
+        elif spec.model == "deeplob":
             factory = DeepLOB
+        elif spec.model == "translob":
+
+            def factory() -> TransLOB:
+                return TransLOB(
+                    input_features=int(config["input_rows"]),
+                    sequence_length=sequence_length,
+                    convolution_channels=int(config["model"]["convolution_channels"]),
+                    attention_heads=int(config["model"]["attention_heads"]),
+                    transformer_blocks=int(config["model"]["transformer_blocks"]),
+                    feedforward_multiplier=int(config["model"]["feedforward_multiplier"]),
+                    dropout=float(config["model"]["dropout"]),
+                )
+        else:
+
+            def factory() -> TLOB:
+                return TLOB(
+                    input_features=int(config["input_rows"]),
+                    sequence_length=sequence_length,
+                    hidden_dim=int(config["model"]["hidden_dim"]),
+                    num_layers=int(config["model"]["num_layers"]),
+                    num_heads=int(config["model"]["num_heads"]),
+                    is_sin_emb=bool(config["model"]["is_sin_emb"]),
+                )
+
         tiny_gate = tiny_batch_overfit_gate(
-            factory, input_shape=(sequence_length, 40), device=device, seed=spec.seed
+            factory,
+            input_shape=(sequence_length, 40),
+            device=device,
+            seed=spec.seed,
+            learning_rate=1e-3 if spec.model == "tlob" else 1e-2,
         )
 
     best_checkpoint_path = checkpoint_root / f"{spec.run_id}.best.pt"
