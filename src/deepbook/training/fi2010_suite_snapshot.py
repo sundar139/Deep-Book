@@ -58,7 +58,7 @@ RUNS_DIR = "artifacts/fi2010/baselines/runs"
 _EXECUTION_COMMIT = "dc78a82d206ab50399bea0a0c147884a94c66e8f"
 _PROTOCOL_COMMIT = "f254599eb215558588aed0647a3e3317dab36da3"
 # Frozen protocol SHA-256 at the time the 900-run baseline suite was accepted.
-# This excludes transformer framework files added later in Phase 3.
+# This excludes the transformer framework files added later.
 _BASELINE_SUITE_PROTOCOL_SHA256 = "c3d5eac2dc722c90cb9b704496ee8b181919c9dbc9f1a76306436a6aa25aac37"
 # Frozen run-index hash from when the 900-run suite was accepted.
 _BASELINE_SUITE_RUN_INDEX_SHA256 = (

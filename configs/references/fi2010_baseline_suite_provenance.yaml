@@ -4,11 +4,11 @@
 # These values were captured when the 900-run suite was accepted
 # (commits 40d77e1 / 52fd936 / 00da49d, finalized at dc78a82).
 # They refer to the protocol state and artifact hashes at that
-# creation time and exclude Phase 3 transformer framework additions.
+# creation time and exclude the later transformer framework additions.
 #
 # DO NOT UPDATE.  This file is a creation-time record, not a
-# live configuration.  Phase 3 additions have their own separate
-# provenance.
+# live configuration.  The transformer framework additions have their
+# own separate provenance.
 
 schema_version: 1
 
@@ -46,7 +46,7 @@ creation_time_raw_artifact_hashes:
   historical_snapshot_json_sha256: "bc2619908651e78b81a1d7878d56d0fccca89fcc0acddc4e4cf8fdd006b364ac"
   historical_snapshot_md_sha256: "d83c247ca05927c0a42be075f37a2694ae97500ed43e6977c4d643db775ece3f"
 
-phase_3_transformer_framework:
+transformer_framework:
   note: "Planned but NOT part of the accepted 900-run suite. Has its own separate provenance."
   models:
     - translob
