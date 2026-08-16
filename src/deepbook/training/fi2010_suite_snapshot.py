@@ -406,16 +406,19 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
             "mlplob",
         ),
     )
-    # DeepLOB reconciliation — all events minus classical events
-    all_rec = _reconciliation_summary(root)
-    deeplob_events = [ev for ev in all_rec["events"] if ev not in classical_rec["events"]]
+    # DeepLOB reconciliation — filter by deeplob model specifically.
+    # Do not use "all events minus classical" — that would absorb future
+    # epoch events (e.g. TransLOB quarantine records) into the frozen
+    # 900-run DeepLOB reconciliation.
+    deeplob_rec_input = _reconciliation_summary(root, model_filter=("deeplob",))
+    deeplob_events = deeplob_rec_input["events"]
     deeplob_rec: dict[str, Any] = {
         "events": deeplob_events,
         "count": len(deeplob_events),
         "digest": _sha256_bytes(
             json.dumps(deeplob_events, sort_keys=True, indent=2).encode("utf-8")
         ),
-        "explanation": all_rec["explanation"],
+        "explanation": deeplob_rec_input["explanation"],
     }
 
     # Majority collapse
@@ -447,11 +450,29 @@ def build_suite_snapshot(root: Path) -> dict[str, Any]:
     )
     deeplob_cfg_hash = configuration_hash(deeplob_cfg)
 
-    # Report hashes — frozen at baseline-suite creation time
-    report_json_path = root / "reports" / "results" / "fi2010_baseline_reproduction.json"
-    report_md_path = root / "reports" / "results" / "fi2010_baseline_reproduction.md"
-    report_json_hash = _sha256_file(report_json_path)
-    report_md_hash = _sha256_file(report_md_path)
+    # Report hashes — frozen at baseline-suite creation time (read from the
+    # tracked provenance record; live reports now summarize the future 1150-run
+    # matrix and must not rewrite the accepted 900-run epoch).
+    provenance_path = root / "configs" / "references" / "fi2010_baseline_suite_provenance.yaml"
+    if not provenance_path.is_file():
+        raise FileNotFoundError(
+            f"Baseline suite provenance file missing: {provenance_path}. "
+            "This file is required for suite reproduction."
+        )
+    prov = yaml.safe_load(provenance_path.read_text(encoding="utf-8"))
+    raw_hashes = prov.get("creation_time_raw_artifact_hashes")
+    if not isinstance(raw_hashes, dict):
+        raise ValueError(
+            f"Provenance file {provenance_path} is missing "
+            "'creation_time_raw_artifact_hashes' section."
+        )
+    report_json_hash = raw_hashes.get("report_json_sha256")
+    report_md_hash = raw_hashes.get("report_md_sha256")
+    if not report_json_hash or not report_md_hash:
+        raise ValueError(
+            f"Provenance file {provenance_path} is missing report hashes: "
+            "report_json_sha256 and report_md_sha256 are required."
+        )
     run_index_hash = _BASELINE_SUITE_RUN_INDEX_SHA256
 
     # Historical snapshot hashes

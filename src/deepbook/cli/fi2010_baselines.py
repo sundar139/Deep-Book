@@ -132,15 +132,20 @@ def _cmd_verify_run(root: Path, run_id: str, artifact_root: Path | None = None) 
     if not metrics_block or not isinstance(metrics_block, dict):
         return _fail("metrics block is empty or not a dict")
 
-    # 3. Verify protocol SHA-256
+    # 3. Verify protocol SHA-256 — accept the frozen baseline-suite epoch hash
+    # (the pre-transformer contract) OR the current transformer-era hash.
+    # Baseline runs legitimately record the frozen baseline protocol identity.
+    from deepbook.training.fi2010_suite_snapshot import _BASELINE_SUITE_PROTOCOL_SHA256
+
     recorded_protocol_hash = manifest.get("protocol_sha256", "")
     current_protocol_hash = protocol_sha256(root)
-    if recorded_protocol_hash != current_protocol_hash:
+    if recorded_protocol_hash not in (current_protocol_hash, _BASELINE_SUITE_PROTOCOL_SHA256):
         return _fail(
             f"protocol SHA-256 mismatch: manifest={recorded_protocol_hash[:16]}... "
-            f"current={current_protocol_hash[:16]}..."
+            f"current={current_protocol_hash[:16]}... "
+            f"baseline-epoch={_BASELINE_SUITE_PROTOCOL_SHA256[:16]}..."
         )
-    print(f"Protocol SHA-256 verified: {current_protocol_hash[:16]}...")
+    print(f"Protocol SHA-256 verified: {recorded_protocol_hash[:16]}...")
 
     # 4. Verify protocol ancestry
     protocol_commit_val = manifest.get("protocol_commit", "")
@@ -368,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "snapshot-suite", help="generate complete 900-cell FI-2010 baseline suite snapshot"
     )
+    sub.add_parser("snapshot-translob", help="generate the 250-cell TransLOB reproduction snapshot")
 
     verify = sub.add_parser("verify-run", help="verify run manifest, hashes, and metrics")
     verify.add_argument("--run-id", required=True, help="run ID to verify")
@@ -392,6 +398,13 @@ def main(argv: list[str] | None = None) -> int:
         json_path, md_path = write_suite_snapshot(root)
         print(f"Suite Snapshot JSON: {json_path}")
         print(f"Suite Snapshot Markdown: {md_path}")
+        return 0
+    if args.command == "snapshot-translob":
+        from deepbook.training.fi2010_translob_snapshot import write_translob_snapshot
+
+        json_path, md_path = write_translob_snapshot(root)
+        print(f"TransLOB Snapshot JSON: {json_path}")
+        print(f"TransLOB Snapshot Markdown: {md_path}")
         return 0
     if args.command == "verify-run":
         return _cmd_verify_run(root, args.run_id)

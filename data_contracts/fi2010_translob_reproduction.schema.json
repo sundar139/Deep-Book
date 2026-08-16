@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deepbook.dev/schemas/fi2010_translob_reproduction.schema.json",
+  "title": "FI-2010 TransLOB Reproduction Snapshot",
+  "description": "Deterministic tracked snapshot of the 250-cell TransLOB confirmatory reproduction.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "title",
+    "study_scope",
+    "protocol_provenance",
+    "coverage",
+    "verification",
+    "cuda",
+    "checkpoint_summary",
+    "collapse_audit",
+    "termination_reasons",
+    "aggregates",
+    "fold_summaries",
+    "seed_summaries",
+    "training_time_summary",
+    "inference_summary",
+    "reconciliation",
+    "disclosures",
+    "hashes",
+    "environment",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "title": {"type": "string"},
+    "study_scope": {"type": "string"},
+    "protocol_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_commit",
+        "framework_commit",
+        "protocol_sha256",
+        "protocol_amendment_sha256",
+        "experiment_config_sha256",
+        "source_reference_sha256",
+        "data_identity_sha256",
+        "archive_sha256",
+        "parameter_count"
+      ],
+      "properties": {
+        "execution_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "framework_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "protocol_sha256": {"type": "string"},
+        "protocol_amendment_sha256": {"type": "string"},
+        "experiment_config_sha256": {"type": "string"},
+        "source_reference_sha256": {"type": "string"},
+        "data_identity_sha256": {"type": "string"},
+        "archive_sha256": {"type": "string"},
+        "parameter_count": {"type": "integer", "const": 101895}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planned_total",
+        "completed_confirmatory",
+        "missing",
+        "failed",
+        "interrupted",
+        "running",
+        "duplicates",
+        "ineligible",
+        "by_model",
+        "by_setup",
+        "folds",
+        "horizons",
+        "seeds",
+        "seed_completeness",
+        "horizon_completeness"
+      ],
+      "properties": {
+        "planned_total": {"type": "integer", "const": 250},
+        "completed_confirmatory": {"type": "integer"},
+        "missing": {"type": "integer", "const": 0},
+        "failed": {"type": "integer", "const": 0},
+        "interrupted": {"type": "integer", "const": 0},
+        "running": {"type": "integer", "const": 0},
+        "duplicates": {"type": "integer", "const": 0},
+        "ineligible": {"type": "integer", "const": 0},
+        "by_model": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "by_setup": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "folds": {"type": "array", "items": {"type": "integer"}},
+        "horizons": {"type": "array", "items": {"type": "integer"}},
+        "seeds": {"type": "array", "items": {"type": "integer"}},
+        "seed_completeness": {"type": "object", "additionalProperties": true},
+        "horizon_completeness": {"type": "object", "additionalProperties": true}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_verified",
+        "metric_mismatches",
+        "prediction_mismatches",
+        "checkpoint_mismatches",
+        "provenance_mismatches"
+      ],
+      "properties": {
+        "total_verified": {"type": "integer"},
+        "metric_mismatches": {"type": "integer", "const": 0},
+        "prediction_mismatches": {"type": "integer", "const": 0},
+        "checkpoint_mismatches": {"type": "integer", "const": 0},
+        "provenance_mismatches": {"type": "integer", "const": 0}
+      }
+    },
+    "cuda": {"type": "object", "additionalProperties": true},
+    "checkpoint_summary": {"type": "object", "additionalProperties": true},
+    "collapse_audit": {"type": "object", "additionalProperties": true},
+    "termination_reasons": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "aggregates": {"type": "object", "additionalProperties": true},
+    "fold_summaries": {"type": "object", "additionalProperties": true},
+    "seed_summaries": {"type": "object", "additionalProperties": true},
+    "training_time_summary": {"type": "object", "additionalProperties": true},
+    "inference_summary": {"type": "object", "additionalProperties": true},
+    "reconciliation": {"type": "object", "additionalProperties": true},
+    "disclosures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wo_source_conflict",
+        "l2_ambiguity",
+        "label_policy",
+        "literature_horizon_30",
+        "negative_result_policy",
+        "tlob_pending",
+        "result_commit_local_only",
+        "framework_commits_local_only",
+        "remote_main_commit",
+        "no_publisher_verification"
+      ],
+      "properties": {
+        "wo_source_conflict": {"type": "string"},
+        "l2_ambiguity": {"type": "string"},
+        "label_policy": {"type": "string"},
+        "literature_horizon_30": {"type": "string"},
+        "negative_result_policy": {"type": "string"},
+        "tlob_pending": {"type": "string"},
+        "result_commit_local_only": {"type": "boolean"},
+        "framework_commits_local_only": {"type": "boolean"},
+        "remote_main_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "no_publisher_verification": {"type": "string"}
+      }
+    },
+    "hashes": {"type": "object", "additionalProperties": true},
+    "environment": {"type": "object", "additionalProperties": true},
+    "limitations": {"type": "array", "items": {"type": "string"}}
+  }
+}
