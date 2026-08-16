@@ -929,14 +929,15 @@
     "peak_gpu_memory_bytes_min": 44131328
   },
   "disclosures": {
-    "framework_commits_local_only": true,
+    "framework_commits_local_only": false,
     "l2_ambiguity": "Paper specifies L2 regularization on dense-64 classifier. Coefficient not recoverable from authoritative sources. Omission frozen as source-ambiguity adaptation.",
     "label_policy": "Official FI-2010 supplied labels only. No alternative labels used.",
     "literature_horizon_30": "Horizon 30 is part of the controlled DeepBook comparison but has no direct paper match (source TransLOB horizon set: 10,20,50,100). Classified as unmatched; no post-hoc tolerance applied.",
     "negative_result_policy": "Negative results are valid findings. No performance threshold was preregistered for TransLOB.",
     "no_publisher_verification": "Local results are reproductions under the tracked protocol; they are not publisher-verified benchmark values.",
-    "remote_main_commit": "00da49d5a14269395cc4a737b0415edf6cb48a84",
-    "result_commit_local_only": true,
+    "remote_main_commit": "cd531ee1a438bec00efb938323ad8d629bc5cb94",
+    "remote_origin_main_disclosure": "Live origin/main resolves to cd531ee1a438. This field reflects the observed remote state at snapshot build time; the repository owner may have pushed additional commits. Result commit presence on any remote branch is reported via result_commit_local_only.",
+    "result_commit_local_only": false,
     "tlob_pending": "TLOB remains unexecuted. 250 cells planned for future execution.",
     "wo_source_conflict": "Paper equation includes W^O; official repository module omits it. DeepBook retains W^O per the paper equation. Classified AMBIGUOUS_SOURCE_CONFLICT."
   },

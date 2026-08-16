@@ -461,9 +461,20 @@ def build_translob_snapshot(root: Path) -> dict[str, Any]:
                 "was preregistered for TransLOB."
             ),
             "tlob_pending": "TLOB remains unexecuted. 250 cells planned for future execution.",
-            "result_commit_local_only": True,
-            "framework_commits_local_only": True,
+            "framework_commits_local_only": not bool(
+                _git(root, "branch", "-r", "--contains", FRAMEWORK_COMMIT)
+            ),
+            "result_commit_local_only": not bool(
+                _git(root, "branch", "-r", "--contains", EXECUTION_COMMIT)
+            ),
             "remote_main_commit": _git(root, "rev-parse", "origin/main"),
+            "remote_origin_main_disclosure": (
+                f"Live origin/main resolves to {_git(root, 'rev-parse', 'origin/main')[:12]}. "
+                "This field reflects the observed remote state at snapshot build time; "
+                "the repository owner may have pushed additional commits. "
+                "Result commit presence on any remote branch is reported via "
+                "result_commit_local_only."
+            ),
             "no_publisher_verification": (
                 "Local results are reproductions under the tracked protocol; "
                 "they are not publisher-verified benchmark values."

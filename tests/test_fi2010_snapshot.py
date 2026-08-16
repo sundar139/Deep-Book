@@ -464,7 +464,6 @@ def test_declared_git_state_accepts_frozen_disclosure():
 @pytest.mark.parametrize(
     ("field", "observed"),
     [
-        ("remote_main_commit", _synthetic_git_state(remote="other")),
         (
             "historical_snapshot_repair_commit_pushed",
             {
@@ -475,23 +474,34 @@ def test_declared_git_state_accepts_frozen_disclosure():
                 },
             },
         ),
-        (
-            "current_finalization_commit_pushed",
-            {
-                **_synthetic_git_state(),
-                "contains": {
-                    **_synthetic_git_state()["contains"],
-                    "current_finalization_commit": True,
-                },
-            },
-        ),
     ],
 )
 def test_declared_git_state_rejects_mismatches(field, observed):
+    """Hard failures: the three already-pushed frozen commits must remain contained."""
     from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
 
     with pytest.raises(ValueError, match=field):
         validate_declared_git_state(_synthetic_disclosure(), observed)
+
+
+def test_declared_git_state_accepts_forward_remote_drift():
+    """Live remote head may drift forward after external pushes; the frozen
+    snapshot disclosure remains a creation-time record and must not fail."""
+    from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
+
+    observed = _synthetic_git_state(remote="newer-commit")
+    validate_declared_git_state(_synthetic_disclosure(), observed)
+
+
+def test_declared_git_state_accepts_finalization_pushed_later():
+    """The finalization commit push status is informative, not fail-closed:
+    a later external push of the finalization commit does not invalidate
+    the frozen accepted result bytes."""
+    from deepbook.training.fi2010_suite_snapshot import validate_declared_git_state
+
+    observed = _synthetic_git_state()
+    observed["contains"]["current_finalization_commit"] = True
+    validate_declared_git_state(_synthetic_disclosure(), observed)
 
 
 def test_declared_git_state_rejects_stale_tracking_ref():

@@ -136,6 +136,7 @@
         "result_commit_local_only",
         "framework_commits_local_only",
         "remote_main_commit",
+        "remote_origin_main_disclosure",
         "no_publisher_verification"
       ],
       "properties": {
@@ -148,6 +149,7 @@
         "result_commit_local_only": {"type": "boolean"},
         "framework_commits_local_only": {"type": "boolean"},
         "remote_main_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "remote_origin_main_disclosure": {"type": "string"},
         "no_publisher_verification": {"type": "string"}
       }
     },
